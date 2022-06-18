@@ -1,0 +1,54 @@
+database:
+  url: mysql://chimes:ks123456@localhost:3306/morinkhuur
+  username:
+  password: 
+
+codegen:
+  app-name: morinkhuur
+  app-authors: Long(long.zou@gmail.com)
+  app-edition: "2021"
+  app-version: 0.1.0
+  output-path: d:/temp/rust/
+  always-generate-handler: true
+  always-generate-entity: true
+  api-handler-prefix: /api/v1
+  webserver-port: "10899"
+  schema-name: morinkhuur
+  tables:
+    - name: MORINKHUUR_USER
+      primary-key: user_id
+      all-field-option: true
+      update-skip-fields: create_date
+      update-seletive: true
+      page-query: true
+      logic-deletion: true
+      api-handler-name: user
+    - name: MORINKHUUR_CANARY
+      struct-name: MorinkhuurCanary
+      primary-key: room_id
+      all-field-option: true
+      auto-generate-key: room_id
+      update-skip-fields: room_id, update_date, create_date
+      update-seletive: true
+      page-query: true
+      logic-deletion: true
+  queries:
+    - base-sql: SELECT * FROM MORINKHUUR_USER WHERE USERNAME = ?
+      struct-name: QueryUser
+      generate-handler: true
+      api-handler-name: user
+      params:
+        - column-names: user_name
+          column-types: varchar
+          default-value: admin
+      variant-params:
+        - column-names: nick_name
+          column-types: varchar
+          column-express: and nick_name like ?
+
+
+
+
+      
+
+
