@@ -90,5 +90,5 @@ PS：目前只支持的MySQL数据库。其它的数据库支持后面再来加�
 
 > 捐赠
 
-<img style="width: 400px;height: 600px;" width="400" height="600" src="https://gitee.com/poethxp/rbatis-generator/raw/master/wx_account.jpg" alt="enjoylost" />
+<img style="width: 400px;height: 545px;" width="400" height="545" src="https://gitee.com/poethxp/rbatis-generator/raw/master/wx_account.jpg" alt="enjoylost" />
 
