@@ -10,7 +10,7 @@ use rbatis::rbatis::Rbatis;
 use serde_derive::{Deserialize, Serialize};
 use crate::codegen::parse_table_as_struct;
 use crate::tmpl::format_conf_tmpl;
-use crate::config::{CodeGenConfig, TableConfig, get_rbatis};
+use crate::config::{CodeGenConfig, TableConfig, get_rbatis, safe_struct_field_name};
 use crate::schema::{TableInfo, ColumnInfo};
 use substring::Substring;
 
@@ -639,19 +639,22 @@ impl CodeGenerator {
 
         for tbl in self.ctx.tables.clone() {
             let mut usinglist = vec![];
-            let funclist = generate_actix_handler_for_table(&self.ctx, &tbl.clone(), &mut usinglist);
+            let tbc = self.ctx.get_table_conf(&tbl.table_name.clone().unwrap_or_default()).unwrap();
+            if tbc.generate_handler {
+                let funclist = generate_actix_handler_for_table(&self.ctx, &tbl.clone(), &mut usinglist);
 
-            usinglist.append(&mut self.default_handler_using.clone());
-            // let tbc =  self.ctx.get_table_conf(&tbl.table_name.clone().unwrap_or_default()).unwrap();
-            let rfi = RustFileImpl {
-                file_name: format!("{}.rs", snake_case(self.ctx.get_struct_name(&tbl.table_name.clone().unwrap_or_default()).unwrap().as_str()).to_string()),
-                mod_name: "handler".to_string(),
-                caretlist: vec![],
-                usinglist: usinglist,
-                structlist: vec![],
-                funclist: funclist,
-            };
-            self.files.push(rfi);
+                usinglist.append(&mut self.default_handler_using.clone());
+                // let tbc =  self.ctx.get_table_conf(&tbl.table_name.clone().unwrap_or_default()).unwrap();
+                let rfi = RustFileImpl {
+                    file_name: format!("{}.rs", snake_case(self.ctx.get_struct_name(&tbl.table_name.clone().unwrap_or_default()).unwrap().as_str()).to_string()),
+                    mod_name: "handler".to_string(),
+                    caretlist: vec![],
+                    usinglist: usinglist,
+                    structlist: vec![],
+                    funclist: funclist,
+                };
+                self.files.push(rfi);
+            }
         }
 
 
@@ -812,7 +815,7 @@ pub fn parse_column_as_field(ctx: &GenerateContext, tbl: &TableConfig, col: &Col
     RustStructField {
         is_pub: true,
         column_name: col.column_name.clone().unwrap_or_default(),
-        field_name: col.column_name.clone().unwrap_or_default().to_lowercase(),
+        field_name: safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_lowercase()),
         field_type: parse_data_type_as_rust_type(&col.data_type.clone().unwrap_or_default().to_lowercase()),
         is_option: if tbl.all_field_option {
             true

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use change_case::{pascal_case, snake_case};
 use rbatis::rbatis::Rbatis;
 use crate::codegen::{RustStructField, GenerateContext, RustStruct, RustFunc, parse_data_type_as_rust_type, parse_column_list, make_skip_columns};
-use crate::config::{TableConfig, get_rbatis};
+use crate::config::{TableConfig, get_rbatis, safe_struct_field_name};
 use crate::schema::{TableInfo, ColumnInfo};
 use substring::Substring;
 
@@ -10,7 +10,7 @@ pub fn parse_column_as_field(ctx: &GenerateContext, tbl: &TableConfig, col: &Col
     RustStructField {
         is_pub: true,
         column_name: col.column_name.clone().unwrap_or_default(),
-        field_name: col.column_name.clone().unwrap_or_default().to_lowercase(),
+        field_name: safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_lowercase()),
         field_type: parse_data_type_as_rust_type(&col.data_type.clone().unwrap_or_default().to_lowercase()),
         is_option: if tbl.all_field_option {
             true
@@ -162,20 +162,22 @@ pub fn generate_func_save_for_struct(ctx: &GenerateContext, tbl: &TableInfo) -> 
         Some(tcl) => {
             if tblinfo.is_some() {
                 let tbc = tblinfo.unwrap();
+                let safe_fdname = safe_struct_field_name(&tcl.column_name.clone().unwrap_or_default().to_lowercase());
                 if tbc.all_field_option {
-                    body.push(format!("self.{} = ds.last_insert_id;", tcl.column_name.clone().unwrap_or_default().to_lowercase()));
+                    body.push(format!("self.{} = ds.last_insert_id;", safe_fdname));
                 } else {
                     if tcl.is_nullable.clone().unwrap_or_default().to_lowercase() == "yes" {
-                        body.push(format!("self.{} = ds.last_insert_id;", tcl.column_name.clone().unwrap_or_default().to_lowercase()));
+                        body.push(format!("self.{} = ds.last_insert_id;", safe_fdname));
                     } else {
-                        body.push(format!("self.{} = ds.last_insert_id.unwrap_or_default();", tcl.column_name.clone().unwrap_or_default().to_lowercase()));
+                        body.push(format!("self.{} = ds.last_insert_id.unwrap_or_default();", safe_fdname));
                     }
                 }
             } else {
+                let safe_fdname = safe_struct_field_name(&tcl.column_name.clone().unwrap_or_default().to_lowercase());
                 if tcl.is_nullable.clone().unwrap_or_default().to_lowercase() == "yes" {
-                    body.push(format!("self.{} = ds.last_insert_id;", tcl.column_name.clone().unwrap_or_default().to_lowercase()));
+                    body.push(format!("self.{} = ds.last_insert_id;", safe_fdname));
                 } else {
-                    body.push(format!("self.{} = ds.last_insert_id.unwrap_or_default();", tcl.column_name.clone().unwrap_or_default().to_lowercase()));
+                    body.push(format!("self.{} = ds.last_insert_id.unwrap_or_default();", safe_fdname));
                 }
             }
         }
@@ -227,7 +229,7 @@ pub fn generate_func_update_for_struct(ctx: &GenerateContext, tbl: &TableInfo) -
     
     body.push(format!("let wp = rb.new_wrapper()"));
     for col in pkcols.clone() {
-        body.push(format!("    .eq(\"{}\", self.{})", col.column_name.clone().unwrap_or_default(), col.column_name.clone().unwrap_or_default().to_string().to_lowercase()));
+        body.push(format!("    .eq(\"{}\", self.{})", col.column_name.clone().unwrap_or_default(), safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_string().to_lowercase())));
         body.push(format!("    .and()"));
     }
     body.remove(body.len() - 1);
@@ -242,7 +244,7 @@ pub fn generate_func_update_for_struct(ctx: &GenerateContext, tbl: &TableInfo) -
     }
 
     for pk in pkcols.clone() {
-        savestr.push_str(format!("Skip::Column(\"{}\"),", pk.column_name.clone().unwrap_or_default()).as_str());
+        savestr.push_str(format!("Skip::Column(\"{}\"),", safe_struct_field_name(&pk.column_name.clone().unwrap_or_default())).as_str());
     }
     if savestr.ends_with(",") {
         savestr = savestr.substring(0, savestr.len() - 1).to_string();
@@ -289,7 +291,7 @@ pub fn generate_func_update_selective_for_struct(ctx: &GenerateContext, tbl: &Ta
     
     body.push(format!("let wp = rb.new_wrapper()"));
     for col in pkcols.clone() {
-        body.push(format!("    .eq(\"{}\", self.{})", col.column_name.clone().unwrap_or_default(), col.column_name.clone().unwrap_or_default().to_string().to_lowercase()));
+        body.push(format!("    .eq(\"{}\", self.{})", col.column_name.clone().unwrap_or_default(), safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_string().to_lowercase())));
         body.push(format!("    .and()"));
     }
     body.remove(body.len() - 1);
@@ -336,7 +338,7 @@ pub fn generate_func_delete_for_struct(ctx: &GenerateContext, tbl: &TableInfo) -
     
     body.push(format!("let wp = rb.new_wrapper()"));
     for col in pkcols.clone() {
-        body.push(format!("    .eq(\"{}\", self.{})", col.column_name.clone().unwrap_or_default(), col.column_name.clone().unwrap_or_default().to_string().to_lowercase()));
+        body.push(format!("    .eq(\"{}\", self.{})", col.column_name.clone().unwrap_or_default(), safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_string().to_lowercase())));
         body.push(format!("    .and()"));
     }
     body.remove(body.len() - 1);
@@ -382,7 +384,8 @@ pub fn generate_func_delete_batch_for_struct(ctx: &GenerateContext, tbl: &TableI
     
     body.push(format!("let wp = rb.new_wrapper()"));
     for col in allcols.clone() {
-        body.push(format!("         .r#if(self.{}.clone().is_some(), |w| w.and().eq(\"{}\", self.{}.clone().unwrap()))", col.column_name.clone().unwrap_or_default().to_string().to_lowercase(), col.column_name.clone().unwrap_or_default(), col.column_name.clone().unwrap_or_default().to_string().to_lowercase()));
+        let safe_fdname = safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_string().to_lowercase());
+        body.push(format!("         .r#if(self.{}.clone().is_some(), |w| w.and().eq(\"{}\", self.{}.clone().unwrap()))", safe_fdname.clone(), col.column_name.clone().unwrap_or_default(), safe_fdname.clone()));
     }
     body.remove(body.len() - 1);
     let last = body.remove(body.len() - 1);
@@ -429,7 +432,8 @@ pub fn generate_func_page_query_for_struct(ctx: &GenerateContext, tbl: &TableInf
     
     body.push(format!("let wp = rb.new_wrapper()"));
     for col in allcols.clone() {
-        body.push(format!("         .r#if(self.{}.clone().is_some(), |w| w.and().eq(\"{}\", self.{}.clone().unwrap()))", col.column_name.clone().unwrap_or_default().to_string().to_lowercase(), col.column_name.clone().unwrap_or_default(), col.column_name.clone().unwrap_or_default().to_string().to_lowercase()));
+        let safe_fdname = safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_string().to_lowercase());
+        body.push(format!("         .r#if(self.{}.clone().is_some(), |w| w.and().eq(\"{}\", self.{}.clone().unwrap()))", safe_fdname.clone(), col.column_name.clone().unwrap_or_default(), safe_fdname.clone()));
     }
     body.remove(body.len() - 1);
     let last = body.remove(body.len() - 1);
@@ -474,7 +478,8 @@ pub fn generate_func_list_query_for_struct(ctx: &GenerateContext, tbl: &TableInf
     
     body.push(format!("let wp = rb.new_wrapper()"));
     for col in allcols.clone() {
-        body.push(format!("         .r#if(self.{}.clone().is_some(), |w| w.and().eq(\"{}\", self.{}.clone().unwrap()))", col.column_name.clone().unwrap_or_default().to_string().to_lowercase(), col.column_name.clone().unwrap_or_default(), col.column_name.clone().unwrap_or_default().to_string().to_lowercase()));
+        let safe_fdname = safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_string().to_lowercase());
+        body.push(format!("         .r#if(self.{}.clone().is_some(), |w| w.and().eq(\"{}\", self.{}.clone().unwrap()))", safe_fdname.clone(), col.column_name.clone().unwrap_or_default(), safe_fdname.clone()));
     }
     body.remove(body.len() - 1);
     let last = body.remove(body.len() - 1);

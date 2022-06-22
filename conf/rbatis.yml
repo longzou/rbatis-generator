@@ -1,50 +1,165 @@
 database:
-  url: mysql://chimes:ks123456@localhost:3306/morinkhuur
+  url: mysql://chimes:ks123456@localhost:3306/chimesrust
   username:
   password: 
 
 codegen:
-  app-name: morinkhuur
+  app-name: chimes-rust
   app-authors: Long(long.zou@gmail.com)
   app-edition: "2021"
   app-version: 0.1.0
-  output-path: d:/temp/rust/
+  output-path: d:/temp/chimes-rust/
   always-generate-handler: true
   always-generate-entity: true
   api-handler-prefix: /api/v1
-  webserver-port: "10899"
-  schema-name: morinkhuur
+  webserver-port: "10999"
+  schema-name: chimesrust
   tables:
-    - name: MORINKHUUR_USER
+    - name: chimes_user
+      struct-name: ChimesUserInfo
       primary-key: user_id
       all-field-option: true
-      update-skip-fields: create_date
+      update-skip-fields: user_id, update_time, create_time
       update-seletive: true
       page-query: true
       logic-deletion: true
       api-handler-name: user
-    - name: MORINKHUUR_CANARY
-      struct-name: MorinkhuurCanary
-      primary-key: room_id
+    - name: chimes_menu
+      struct-name: ChimesMenuInfo
+      primary-key: menu_id
       all-field-option: true
-      auto-generate-key: room_id
-      update-skip-fields: room_id, update_date, create_date
+      auto-generate-key: menu_id
+      update-skip-fields: menu_id, update_time, create_time
       update-seletive: true
       page-query: true
       logic-deletion: true
+      api-handler-name: menu
+    - name: chimes_permission
+      struct-name: ChimesPermissionInfo
+      primary-key: id
+      all-field-option: true
+      auto-generate-key: id
+      update-skip-fields: id, create_time
+      update-seletive: true
+      page-query: true
+      logic-deletion: true
+      api-handler-name: permission
+    - name: chimes_role
+      struct-name: ChimesRoleInfo
+      primary-key: role_id
+      all-field-option: true
+      auto-generate-key: role_id
+      update-skip-fields: role_id, create_time, update_time
+      update-seletive: true
+      page-query: true
+      logic-deletion: true
+      api-handler-name: role
+    - name: chimes_dept
+      struct-name: ChimesDeptInfo
+      primary-key: dept_id
+      all-field-option: true
+      auto-generate-key: dept_id
+      update-skip-fields: dept_id, create_time, update_time
+      update-seletive: true
+      page-query: true
+      logic-deletion: true
+      api-handler-name: dept
+    - name: chimes_job
+      struct-name: ChimesJobInfo
+      primary-key: job_id
+      all-field-option: true
+      auto-generate-key: job_id
+      update-skip-fields: job_id, create_time, update_time
+      update-seletive: true
+      page-query: true
+      logic-deletion: true
+      api-handler-name: job
+    - name: chimes_dict
+      struct-name: ChimesDictInfo
+      primary-key: dict_id
+      all-field-option: true
+      auto-generate-key: dict_id
+      update-skip-fields: dict_id, create_time, update_time
+      update-seletive: true
+      page-query: true
+      logic-deletion: true
+      api-handler-name: dict
+    - name: chimes_dict_detail
+      struct-name: ChimesDictDetailInfo
+      primary-key: detail_id
+      all-field-option: true
+      auto-generate-key: detail_id
+      update-skip-fields: detail_id, create_time, update_time
+      update-seletive: true
+      page-query: true
+      logic-deletion: true
+      api-handler-name: dict_detail
+    - name: chimes_log
+      struct-name: ChimesLogInfo
+      primary-key: log_id
+      all-field-option: true
+      auto-generate-key: log_id
+      update-skip-fields: log_id, create_time
+      update-seletive: true
+      page-query: true
+      logic-deletion: true
+      api-handler-name: logs
+    - name: chimes_roles_depts
+      struct-name: ChimesRoleDeptInfo
+      primary-key: role_id, dept_id
+      all-field-option: true
+      update-seletive: false
+      page-query: false
+      logic-deletion: false
+      generate-handler: false
+    - name: chimes_users_roles
+      struct-name: ChimesUserRoleInfo
+      primary-key: role_id, user_id
+      all-field-option: true
+      update-seletive: false
+      page-query: false
+      logic-deletion: false
+      generate-handler: false
+    - name: chimes_roles_permissions
+      struct-name: ChimesRolePermissionInfo
+      primary-key: role_id, permission_id
+      all-field-option: true
+      update-seletive: false
+      page-query: false
+      logic-deletion: false
+      generate-handler: false
+    - name: chimes_roles_menus
+      struct-name: ChimesRoleMenuInfo
+      primary-key: role_id, Menu_id
+      all-field-option: true
+      update-seletive: false
+      page-query: false
+      logic-deletion: false
+      generate-handler: false
+    - name: chimes_users_jobs
+      struct-name: ChimesUserJobInfo
+      primary-key: user_id, job_id
+      all-field-option: true
+      update-seletive: false
+      page-query: false
+      logic-deletion: false
+      generate-handler: false
   queries:
-    - base-sql: SELECT * FROM MORINKHUUR_USER WHERE USERNAME = ?
-      struct-name: QueryUser
-      generate-handler: true
+    - base-sql: SELECT p.*, cu.username FROM chimes_permission p LEFT JOIN chimes_roles_permissions rp ON p.id = rp.permission_id  LEFT JOIN chimes_users_roles cur ON rp.role_id = cur.role_id  LEFT JOIN chimes_user cu ON cur.user_id  = cu.user_id  WHERE p.api_method = ? AND p.api_pattern  = ? AND cu.username  = ? 
+      struct-name: QueryUserPermission
+      generate-handler: false
       api-handler-name: user
       params:
-        - column-names: user_name
+        - column-names: api_method
+          column-types: varchar
+          default-value: POST
+        - column-names: api_pattern
+          column-types: varchar
+          default-value: /api/v1/user/save
+        - column-names: username
           column-types: varchar
           default-value: admin
-      variant-params:
-        - column-names: nick_name
-          column-types: varchar
-          column-express: and nick_name like ?
+
 
 
 

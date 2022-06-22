@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::mem::MaybeUninit;
 use std::sync::{Mutex, Once};
@@ -22,6 +23,48 @@ pub struct MysqlConfig {
     pub password: String
 }
 
+
+lazy_static!{
+    pub static ref RUST_KEY_RENAME_MAP: HashMap<String, String> = {
+      let mut hm = HashMap::new();
+      hm.insert("type".to_string(), "r#type".to_string());
+      hm.insert("struct".to_string(), "r#struct".to_string());
+      hm.insert("pub".to_string(), "r#pub".to_string());
+      hm.insert("static".to_string(), "r#static".to_string());
+      hm.insert("else".to_string(), "r#else".to_string());
+      hm.insert("while".to_string(), "r#while".to_string());
+      hm.insert("async".to_string(), "r#async".to_string());
+      hm.insert("const".to_string(), "r#const".to_string());
+      hm.insert("use".to_string(), "r#use".to_string());
+      hm.insert("mod".to_string(), "r#mod".to_string());
+      hm.insert("main".to_string(), "r#main".to_string());
+      hm.insert("match".to_string(), "r#match".to_string());
+      hm.insert("let".to_string(), "r#let".to_string());
+      hm.insert("mut".to_string(), "r#mut".to_string());
+      hm.insert("crate".to_string(), "r#crate".to_string());
+      hm.insert("if".to_string(), "r#if".to_string());
+      hm.insert("return".to_string(), "r#return".to_string());
+      hm.insert("self".to_string(), "r#self".to_string());
+      
+      return hm;
+    };
+}
+
+
+pub fn safe_struct_field_name (oldname: &String) -> String {
+    if (RUST_KEY_RENAME_MAP.contains_key(&oldname.to_lowercase())) {
+        match RUST_KEY_RENAME_MAP.get(&oldname.to_lowercase()) {
+            Some(tn) => {
+                tn.to_owned()
+            }
+            None => {
+                oldname.to_owned()
+            }
+        }
+    } else {
+        oldname.to_owned()
+    }
+}
 
 lazy_static!{
     pub static ref RB: Rbatis = {

@@ -2,7 +2,7 @@ use change_case::{pascal_case, snake_case};
 use chrono::format::format;
 use substring::Substring;
 use crate::codegen::{GenerateContext, RustFunc, parse_data_type_as_rust_type};
-use crate::config::{AppConfig, QueryConfig};
+use crate::config::{AppConfig, QueryConfig, safe_struct_field_name};
 
 use sqlx::Row;
 use sqlx::Column;
@@ -40,7 +40,7 @@ pub async fn execute_sql(sql: &str, fds: &Vec<String>) -> Result<TransformRow, s
             let rsf = RustStructField {
                 is_pub: true,
                 column_name: col.name().to_string(), 
-                field_name: col.name().to_string().to_lowercase(),
+                field_name: safe_struct_field_name(&col.name().to_string().to_lowercase()),
                 field_type: parse_data_type_as_rust_type(&col.type_info().name().to_string().to_lowercase()),
                 is_option: true,
             };
@@ -116,7 +116,7 @@ pub fn parse_query_params_as_struct(ctx: &GenerateContext, tbl: &QueryConfig) ->
     let st = RustStructField {
         is_pub: true,
         column_name: String::new(),
-        field_name: fd.column_names.unwrap(),
+        field_name: safe_struct_field_name(&fd.column_names.unwrap()),
         field_type: parse_data_type_as_rust_type(&fd.column_types.unwrap()),
         is_option: false,
     };
@@ -138,7 +138,7 @@ pub fn parse_query_params_as_struct(ctx: &GenerateContext, tbl: &QueryConfig) ->
                 let st = RustStructField {
                   is_pub: true,
                   column_name: String::new(),
-                  field_name: fdname,
+                  field_name: safe_struct_field_name(&fdname),
                   field_type: parse_data_type_as_rust_type(&fdtype),
                   is_option: true,
                 };
