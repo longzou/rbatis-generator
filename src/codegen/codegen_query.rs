@@ -89,10 +89,18 @@ pub fn parse_query_as_struct(ctx: &GenerateContext, tbl: &QueryConfig, cols: &Tr
 
   let mut funclist = vec![];
 
-  let queryfunc = parse_query_as_func(ctx, tbl, false);
-  let pagedfunc = parse_query_as_func(ctx, tbl, true);
-  funclist.push(queryfunc);
-  funclist.push(pagedfunc);
+  
+  if tbl.single_result {
+    let onerowfunc = parse_query_as_func(ctx, tbl, false, true);
+    funclist.push(onerowfunc);
+  } else {
+    let queryfunc = parse_query_as_func(ctx, tbl, false, false);
+    let pagedfunc = parse_query_as_func(ctx, tbl, true, false);
+    
+    funclist.push(queryfunc);
+    funclist.push(pagedfunc);
+  }
+  
   
   RustStruct {
       is_pub: true,
@@ -167,7 +175,7 @@ pub fn parse_query_params_as_struct(ctx: &GenerateContext, tbl: &QueryConfig) ->
 }
 
 
-pub fn parse_query_as_func(ctx: &GenerateContext, tbl: &QueryConfig, paging: bool) -> RustFunc {
+pub fn parse_query_as_func(ctx: &GenerateContext, tbl: &QueryConfig, paging: bool, onerow: bool) -> RustFunc {
   let mut params = vec![];
   let mut body = vec![];
   let param_type = tbl.struct_name.clone() + "Params";
@@ -235,13 +243,21 @@ pub fn parse_query_as_func(ctx: &GenerateContext, tbl: &QueryConfig, paging: boo
   if paging {
     body.push("return rb.fetch_page(&sql, rb_args, &PageRequest::new(curr, size)).await".to_string());
   } else {
-    body.push("return rb.fetch(&sql, rb_args).await".to_string());
+    if onerow {
+      body.push("return rb.fetch(&sql, rb_args).await".to_string());
+    } else {
+      body.push("return rb.fetch(&sql, rb_args).await".to_string());
+    }
   }
   
   let ret_type = if paging {
     format!("Page<{}>", tbl.struct_name.clone())
   } else {
-    format!("Vec<{}>", tbl.struct_name.clone())
+    if onerow {
+      format!("Option<{}>", tbl.struct_name.clone())
+    } else {
+      format!("Vec<{}>", tbl.struct_name.clone())
+    }
   };
 
   RustFunc {
@@ -270,7 +286,7 @@ pub fn parse_query_as_func(ctx: &GenerateContext, tbl: &QueryConfig, paging: boo
 /**
  * 生成Query 的Handler
  */
-pub fn generate_handler_query_for_query(ctx: &GenerateContext, tbl: &QueryConfig, paging: bool) -> RustFunc {
+pub fn generate_handler_query_for_query(ctx: &GenerateContext, tbl: &QueryConfig, paging: bool, onerow: bool) -> RustFunc {
   let tbl_name = tbl.struct_name.clone();
   let tbl_param_name = format!("{}Params", tbl_name);
 
@@ -296,16 +312,34 @@ pub fn generate_handler_query_for_query(ctx: &GenerateContext, tbl: &QueryConfig
   body.push(format!("Ok(st) => {{"));
   if paging {
     body.push(format!("let ret: web::Json<ApiResult<Page<{}>>> = web::Json(ApiResult::ok(st));", tbl_name.clone()));
+    body.push(format!("Ok(HttpResponse::Ok().json(ret))"));
   } else {
-    body.push(format!("let ret: web::Json<ApiResult<Vec<{}>>> = web::Json(ApiResult::ok(st));", tbl_name.clone()));
+    if onerow {
+      body.push(format!("match st {{"));
+      body.push(format!("Some(vst) => {{"));
+      body.push(format!("let ret: web::Json<ApiResult<{}>> = web::Json(ApiResult::ok(vst));", tbl_name.clone()));
+      body.push(format!("Ok(HttpResponse::Ok().json(ret))"));
+      body.push(format!("}}"));
+      body.push(format!("None => {{"));
+      body.push(format!("let ret: web::Json<ApiResult<{}>> = web::Json(ApiResult::error(5404, &\"NOT-Found\".to_string()));", tbl_name.clone()));
+      body.push(format!("Ok(HttpResponse::Ok().json(ret))"));
+      body.push(format!("}}"));
+      body.push(format!("}}"));
+    } else {
+      body.push(format!("let ret: web::Json<ApiResult<Vec<{}>>> = web::Json(ApiResult::ok(st));", tbl_name.clone()));
+      body.push(format!("Ok(HttpResponse::Ok().json(ret))"));
+    }
   }
-  body.push(format!("Ok(HttpResponse::Ok().json(ret))"));
   body.push("}".to_string());
   body.push("Err(err) => {".to_string());
   if paging {
     body.push(format!("let ret: web::Json<ApiResult<Page<{}>>> = web::Json(ApiResult::error(5010, &err.to_string()));", tbl_name.clone()));
   } else {
-    body.push(format!("let ret: web::Json<ApiResult<Vec<{}>>> = web::Json(ApiResult::error(5010, &err.to_string()));", tbl_name.clone()));
+    if onerow {
+      body.push(format!("let ret: web::Json<ApiResult<{}>> = web::Json(ApiResult::error(5010, &err.to_string()));", tbl_name.clone()));
+    } else {
+      body.push(format!("let ret: web::Json<ApiResult<Vec<{}>>> = web::Json(ApiResult::error(5010, &err.to_string()));", tbl_name.clone()));
+    }
   }
   body.push(format!("Ok(HttpResponse::Ok().json(ret))"));
   body.push("}".to_string());
@@ -340,6 +374,8 @@ pub fn generate_handler_query_for_query(ctx: &GenerateContext, tbl: &QueryConfig
 }
 
 
+
+
 pub fn parse_query_handler_as_file(ctx: &GenerateContext, tbl: &QueryConfig, cols: &TransformRow) -> RustFileImpl {
   let tbl_name = tbl.struct_name.clone();
   let tbl_param_name = format!("{}Params", tbl_name);
@@ -348,9 +384,11 @@ pub fn parse_query_handler_as_file(ctx: &GenerateContext, tbl: &QueryConfig, col
   let mut usinglist = CodeGenerator::get_default_handler_using();
   usinglist.push(format!("crate::query::{{{}, {}}}", tbl_name.clone(), tbl_param_name.clone()));
 
+
   
-  let queryfunc = generate_handler_query_for_query(ctx, tbl, false);
-  let pagefunc = generate_handler_query_for_query(ctx, tbl, true);
+  let queryfunc = generate_handler_query_for_query(ctx, tbl, false, false);
+  let pagefunc = generate_handler_query_for_query(ctx, tbl, true, false);
+  let onerowfunc = generate_handler_query_for_query(ctx, tbl, false, true);
 
   RustFileImpl { 
     file_name: snake_case(tbl.struct_name.clone().as_str()) + ".rs",
@@ -358,6 +396,10 @@ pub fn parse_query_handler_as_file(ctx: &GenerateContext, tbl: &QueryConfig, col
     caretlist: vec![],
     usinglist: usinglist, 
     structlist: vec![],
-    funclist: vec![pagefunc, queryfunc]
+    funclist: if tbl.single_result {
+      vec![onerowfunc]
+     } else {
+      vec![pagefunc, queryfunc]
+     }
   }
 }

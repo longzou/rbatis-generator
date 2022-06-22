@@ -194,6 +194,7 @@ pub struct QueryParam {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct QueryConfig {
     pub base_sql: String,
+    pub single_result: bool,
     pub struct_name: String,
     pub api_handler_name: String,
     pub generate_handler: bool,
@@ -236,6 +237,10 @@ impl QueryConfig {
             }
         };
         self.base_sql = node["base-sql"].as_str().unwrap_or_default().to_string();
+        self.single_result = match node["single-result"].as_bool() {
+            Some(tt) => tt,
+            None => false
+        };
         self.generate_handler = node["generate-handler"].as_bool().unwrap_or_default();
 
         let mut params = Vec::new();

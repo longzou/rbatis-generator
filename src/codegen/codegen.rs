@@ -590,9 +590,11 @@ impl CodeGenerator {
                         log::info!("Field of query: {} {}", fd.field_name, fd.field_type);
                     }
                     let st = parse_query_as_file(&self.ctx, &qry, &rt);
-                    let hl = parse_query_handler_as_file(&self.ctx, &qry, &rt);
                     self.files.push(st);
-                    self.files.push(hl);
+                    if (qry.generate_handler) {
+                        let hl = parse_query_handler_as_file(&self.ctx, &qry, &rt);
+                        self.files.push(hl);
+                    }
                 }
                 Err(err) => {
                     log::info!("Execute the query with an error {}", err);
