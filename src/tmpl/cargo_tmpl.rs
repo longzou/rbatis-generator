@@ -23,6 +23,7 @@ http = "0.2.6"
 json = "0.12.4"
 lazy_static = "1.4.0"
 md5 = "0.7.0"
+rsa = "0.6.1"
 percent-encoding = "2.1.0"
 serde = "1.0.136"
 serde_derive = "1.0.136"
@@ -40,7 +41,9 @@ chrono = "0.4.19"
 async-std = "1.7.0"
 rbatis = {version = "3.1.11", features = ["debug_mode"]}
 tokio = {version = "1.10", features = ["full", "rt-multi-thread"] }
-
+chimes-auth = {version = "0.1.0", features = ["session"]}
+captcha = "0.0.9"
+jsonwebtoken = "8.1.1"
 "#;
 
 

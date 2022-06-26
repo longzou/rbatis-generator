@@ -37,6 +37,7 @@ pub async fn execute_sql(sql: &str, fds: &Vec<String>) -> Result<TransformRow, s
             // let tid = col.type_id().to_owned();
             column_text.push_str(col.name().to_string().as_str());
             column_text.push_str(",");
+            log::info!("Column: {} type is {}.", col.name().clone().to_string(), col.type_info().clone().name().to_string().to_lowercase());
             let rsf = RustStructField {
                 is_pub: true,
                 column_name: col.name().to_string(), 
@@ -64,7 +65,7 @@ pub async fn execute_sql(sql: &str, fds: &Vec<String>) -> Result<TransformRow, s
 pub fn parse_query_as_file(ctx: &GenerateContext, tbl: &QueryConfig, cols: &TransformRow) -> RustFileImpl {
   let st = parse_query_as_struct(ctx, tbl, cols);
   let st_params = parse_query_params_as_struct(ctx, tbl);
-  let mut usinglist = CodeGenerator::get_default_entity_using();
+  let mut usinglist = CodeGenerator::get_default_entity_using(!tbl.single_result);
 
   RustFileImpl { 
     file_name: snake_case(tbl.struct_name.clone().as_str()) + ".rs",
@@ -104,6 +105,7 @@ pub fn parse_query_as_struct(ctx: &GenerateContext, tbl: &QueryConfig, cols: &Tr
   
   RustStruct {
       is_pub: true,
+      has_paging: !tbl.single_result,
       struct_name: tbl.struct_name.clone(),
       annotations: anno,
       fields: fields,
@@ -167,6 +169,7 @@ pub fn parse_query_params_as_struct(ctx: &GenerateContext, tbl: &QueryConfig) ->
 
   RustStruct {
       is_pub: true,
+      has_paging: !tbl.single_result,
       struct_name: tbl.struct_name.clone() + "Params",
       annotations: anno,
       fields: fields,
@@ -187,7 +190,11 @@ pub fn parse_query_as_func(ctx: &GenerateContext, tbl: &QueryConfig, paging: boo
     params.push(("size".to_string(), "u64".to_string()));
   }
 
-  body.push(format!("let mut sql = \"{}\".to_string();", tbl.base_sql));
+  if tbl.variant_params.is_empty() {
+    body.push(format!("let sql = \"{}\".to_string();", tbl.base_sql));
+  } else {
+    body.push(format!("let mut sql = \"{}\".to_string();", tbl.base_sql));
+  }
   body.push("let mut rb_args = vec![];".to_string());
 
   for sp in tbl.params.clone() {
@@ -276,7 +283,7 @@ pub fn parse_query_as_func(ctx: &GenerateContext, tbl: &QueryConfig, paging: boo
     return_type: Some(ret_type),
     params: params,
     bodylines: body,
-    macros: vec![],
+    macros: vec!["#[allow(dead_code)]".to_string()],
   }
 }
 
@@ -295,8 +302,7 @@ pub fn generate_handler_query_for_query(ctx: &GenerateContext, tbl: &QueryConfig
   params.push(("req".to_string(), format!("web::Json<{}>", tbl_param_name.clone())));
 
   if paging {
-    params.push(("current".to_string(), format!("web::Path<u64>")));
-    params.push(("size".to_string(), format!("web::Path<u64>")));
+    params.push(("path_param".to_string(), format!("web::Path<(u64, u64)>")));
   }
  
   let mut body = vec![];
@@ -304,7 +310,8 @@ pub fn generate_handler_query_for_query(ctx: &GenerateContext, tbl: &QueryConfig
   body.push(format!("let rb = get_rbatis();"));
   body.push(format!("let val = req.to_owned();"));
   if paging {
-    body.push(format!("match {}::query_paged(rb, &val, current.to_owned(), size.to_owned()).await {{", tbl_name.clone()));
+    body.push(format!("let (current, size) = path_param.into_inner();"));
+    body.push(format!("match {}::query_paged(rb, &val, current, size).await {{", tbl_name.clone()));
   } else {
     body.push(format!("match {}::query(rb, &val).await {{", tbl_name.clone()));
   }
@@ -381,8 +388,9 @@ pub fn parse_query_handler_as_file(ctx: &GenerateContext, tbl: &QueryConfig, col
   let tbl_param_name = format!("{}Params", tbl_name);
 
   
-  let mut usinglist = CodeGenerator::get_default_handler_using();
+  let mut usinglist = CodeGenerator::get_default_handler_using(!tbl.single_result);
   usinglist.push(format!("crate::query::{{{}, {}}}", tbl_name.clone(), tbl_param_name.clone()));
+  usinglist.push(format!("rbatis::Page"));
 
 
   

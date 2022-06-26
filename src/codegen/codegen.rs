@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{Debug};
-use std::io::{self, Write};
+use std::io::{self, Write, ErrorKind};
 use std::path::Path;
 use std::path::PathBuf;
 use std::fs::{create_dir, create_dir_all, OpenOptions};
@@ -14,7 +14,7 @@ use crate::config::{CodeGenConfig, TableConfig, get_rbatis, safe_struct_field_na
 use crate::schema::{TableInfo, ColumnInfo};
 use substring::Substring;
 
-use super::{generate_actix_handler_for_table, execute_sql, parse_query_as_struct, parse_query_as_file, parse_query_handler_as_file};
+use super::{generate_actix_handler_for_table, execute_sql, parse_query_as_struct, parse_query_as_file, parse_query_handler_as_file, parse_relation_handlers_as_file, parse_relation_as_file, parse_table_as_value_object_struct, parse_yaml_as_file};
 
 pub trait CodeWriter {
     fn write(&self, ro: &mut RustOutput);
@@ -36,8 +36,8 @@ pub struct GenerateContext {
 
 impl GenerateContext {
 
-    pub fn create(cgconf: &CodeGenConfig) -> Self { 
-        Self { 
+    pub fn create(cgconf: &CodeGenConfig) -> Self {
+        Self {
             codegen_conf: cgconf.clone(), 
             tables: vec![], 
             columns: HashMap::new(), 
@@ -116,6 +116,19 @@ impl GenerateContext {
         None
     }
 
+    pub fn get_value_object_struct_name(&self, tbl: &String) -> Option<String> {
+        for tc in self.codegen_conf.tables.clone() {
+            if tc.name == tbl.clone() {
+                if tc.struct_name.is_empty() {
+                    return Some(format!("{}Value", pascal_case(tc.name.clone().as_str())));
+                } else {
+                    return Some(format!("{}Value", tc.struct_name.clone().as_str()));
+                }
+            }
+        }
+        None
+    }
+
     pub fn get_table_conf(&self, tbl: &String) -> Option<TableConfig> {
         for tc in self.codegen_conf.tables.clone() {
             if tc.name == tbl.clone() {
@@ -141,6 +154,22 @@ impl GenerateContext {
             }
             None => {
                 vec![]
+            }
+        }
+    }
+
+    pub fn find_table_column(&self, tbl: &String, col: &String) -> Option<ColumnInfo> {
+        match self.columns.get(&tbl.clone()) {
+            Some(st) => {
+                for xs in st.clone() {
+                    if xs.column_name.clone().unwrap_or_default().to_lowercase() == col.to_lowercase() {
+                        return Some(xs.clone());
+                    }
+                }
+                None
+            }
+            None => {
+                None
             }
         }
     }
@@ -267,18 +296,22 @@ impl CodeWriter for RustFunc {
             first = first.substring(0, first.len() - 1).to_string();
         }
         first.push(')');
-        if self.return_is_result {
-            if self.return_is_option {
-                first.push_str(&format!(" -> Result<Option<{}>, Error> {{", self.return_type.clone().unwrap_or_default()));
+        if self.return_type.is_some() {
+            if self.return_is_result {
+                if self.return_is_option {
+                    first.push_str(&format!(" -> Result<Option<{}>, Error> {{", self.return_type.clone().unwrap_or_default()));
+                } else {
+                    first.push_str(&format!(" -> Result<{}, Error> {{", self.return_type.clone().unwrap_or_default()));
+                }
             } else {
-                first.push_str(&format!(" -> Result<{}, Error> {{", self.return_type.clone().unwrap_or_default()));
+                if self.return_is_option {
+                    first.push_str(&format!(" -> Option<{}> {{", self.return_type.clone().unwrap_or_default()));
+                } else {
+                    first.push_str(&format!(" -> {} {{", self.return_type.clone().unwrap_or_default()));
+                }
             }
         } else {
-            if self.return_is_option {
-                first.push_str(&format!(" -> Option<{}> {{", self.return_type.clone().unwrap_or_default()));
-            } else {
-                first.push_str(&format!(" -> {} {{", self.return_type.clone().unwrap_or_default()));
-            }
+            first.push_str(" {");
         }
         let mut space = 0i32;
         if self.is_struct_fn {
@@ -333,6 +366,7 @@ pub struct RustStructField {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RustStruct {
     pub is_pub: bool,
+    pub has_paging: bool,
     pub struct_name: String,
     pub annotations: Vec<String>,
     pub fields: Vec<RustStructField>,
@@ -494,8 +528,8 @@ impl RustFileImpl {
 pub struct CodeGenerator {
     pub ctx: GenerateContext,
     pub files: Vec<RustFileImpl>,
-    pub default_entity_using: Vec<String>,
-    pub default_handler_using: Vec<String>,
+    //pub default_entity_using: Vec<String>,
+    //pub default_handler_using: Vec<String>,
 }
 
 impl CodeGenerator {
@@ -508,34 +542,34 @@ impl CodeGenerator {
         Self {
             ctx: ctx.clone(),
             files: vec![],
-            default_entity_using: Self::get_default_entity_using(),
-            default_handler_using: Self::get_default_handler_using(),
+            // default_entity_using: Self::get_default_entity_using(true),
+            // default_handler_using: Self::get_default_handler_using(true),
         }
     }
 
-    pub fn get_default_entity_using() -> Vec<String> {
+    pub fn get_default_entity_using(paging: bool) -> Vec<String> {
         let mut list = vec![];
         list.push("std::fmt::{Debug}".to_string());
-        list.push("rbatis::crud::{CRUD, Skip}".to_string());
         list.push("serde_derive::{Deserialize, Serialize}".to_string());
-        list.push("rbatis::{sql, crud_table}".to_string());
+        list.push("rbatis::crud_table".to_string());
         list.push("rbatis::rbatis::{Rbatis}".to_string());
-        list.push("rbatis::executor::{ Executor, ExecutorMut }".to_string());
+        // list.push("rbatis::executor::{ Executor, ExecutorMut }".to_string());
         list.push("rbatis::error::Error".to_string());
-        list.push("rbatis::DateTimeNative".to_string());
-        list.push("rbatis::Page".to_string());
-        list.push("rbatis::PageRequest".to_string());
-        list.push("rbson::Bson".to_string());
+        if paging {
+            list.push("rbatis::Page".to_string());
+            list.push("rbatis::PageRequest".to_string());
+            list.push("rbson::Bson".to_string());
+        }
+        list.push("rbatis::crud::{CRUD, Skip}".to_string());
         list
     }
 
-    pub fn get_default_handler_using() -> Vec<String> {
+    pub fn get_default_handler_using(_paging: bool) -> Vec<String> {
         let mut list = vec![];
 
-        list.push("crate::utils::{ApiResult, get_rbatis}".to_string());
-        list.push("actix_web::{web, HttpRequest, HttpResponse, Result}".to_string());
-        list.push("rbatis::Page".to_string());
-
+        list.push("crate::utils::get_rbatis".to_string());
+        list.push("chimes_auth::ApiResult".to_string());
+        list.push("actix_web::{web, HttpResponse, Result}".to_string());
         list
     }
 
@@ -586,9 +620,6 @@ impl CodeGenerator {
 
             match execute_sql(qry.base_sql.as_str(), &fds).await {
                 Ok(rt) => {
-                    for fd in rt.fields.clone() {
-                        log::info!("Field of query: {} {}", fd.field_name, fd.field_type);
-                    }
                     let st = parse_query_as_file(&self.ctx, &qry, &rt);
                     self.files.push(st);
                     if (qry.generate_handler) {
@@ -608,20 +639,34 @@ impl CodeGenerator {
      * 根据Table来进行代码生成
      */
     pub fn generate(&mut self) {
+        let mut hashm = HashMap::new();
         for tbl in self.ctx.tables.clone() {
             let columns = self.ctx.get_table_columns(&tbl.table_name.clone().unwrap_or_default());
             let st = parse_table_as_struct(&self.ctx, &tbl, &columns);
             self.ctx.add_struct(&st);
+
+            let tbcc = self.ctx.get_table_conf(&tbl.table_name.clone().unwrap_or_default()).unwrap();
+            if tbcc.tree_parent_field.is_some() {
+                let stvo = parse_table_as_value_object_struct(&self.ctx, &tbl, &columns);
+                hashm.insert(st.struct_name.to_string(), stvo);
+            }
         }
 
         // 组织文件结构
         for sts in self.ctx.structs.clone() {
+            let stlist = if hashm.contains_key(&sts.struct_name.clone()) {
+                let mx = hashm[&sts.struct_name.clone()].clone();
+                vec![sts.clone(), mx]
+            } else {
+                vec![sts.clone()]
+            };
+
             let rfi = RustFileImpl {
                 file_name: format!("{}.rs", snake_case(sts.struct_name.clone().as_str())),
                 mod_name: "entity".to_string(),
                 caretlist: vec![],
-                usinglist: self.default_entity_using.clone(),
-                structlist: vec![sts.clone()],
+                usinglist: Self::get_default_entity_using(sts.has_paging),
+                structlist: stlist,
                 funclist: vec![],
             };
             self.files.push(rfi);
@@ -632,7 +677,7 @@ impl CodeGenerator {
                 file_name: format!("{}.rs", snake_case(sts.struct_name.clone().as_str())),
                 mod_name: "query".to_string(),
                 caretlist: vec![],
-                usinglist: self.default_entity_using.clone(),
+                usinglist: Self::get_default_entity_using(sts.has_paging),
                 structlist: vec![sts.clone()],
                 funclist: vec![],
             };
@@ -645,7 +690,7 @@ impl CodeGenerator {
             if tbc.generate_handler {
                 let funclist = generate_actix_handler_for_table(&self.ctx, &tbl.clone(), &mut usinglist);
 
-                usinglist.append(&mut self.default_handler_using.clone());
+                usinglist.append(&mut Self::get_default_handler_using(tbc.page_query));
                 // let tbc =  self.ctx.get_table_conf(&tbl.table_name.clone().unwrap_or_default()).unwrap();
                 let rfi = RustFileImpl {
                     file_name: format!("{}.rs", snake_case(self.ctx.get_struct_name(&tbl.table_name.clone().unwrap_or_default()).unwrap().as_str()).to_string()),
@@ -658,6 +703,41 @@ impl CodeGenerator {
                 self.files.push(rfi);
             }
         }
+
+        for rel in self.ctx.codegen_conf.relations.clone() {
+            match parse_relation_as_file(&self.ctx, &rel) {
+                Some(rfi) => {
+                    self.files.push(rfi);
+                }
+                None => {
+                    log::info!("Could not generated relation entity for {}", rel.major_table);
+                }
+            }
+                        
+            if rel.generate_handler {
+                match parse_relation_handlers_as_file(&self.ctx, &rel) {
+                    Some(rfi) => {
+                        self.files.push(rfi);
+                    }
+                    None => {
+                        log::info!("Could not generated relation handler for {}", rel.major_table);
+                    }
+                }
+            }
+        }
+
+        match self.ctx.codegen_conf.config_template_generate.clone() {
+            // should generate the config template parse 
+            Some(fl) => {
+                let rfi = parse_yaml_as_file(&fl, &"app_config.rs".to_string());
+                if !rfi.structlist.is_empty() {
+                    self.files.push(rfi);
+                }
+            },
+            None => {
+
+            }
+        };
 
 
     }
@@ -741,20 +821,43 @@ impl CodeGenerator {
             let mn = mkey.0.clone();
             mainmods.push(mn.clone());
             let tj = src.join(mkey.0.clone()).join("mod.rs");  // Generate the mod.rs for each folder
-            let mut tjfile = OpenOptions::new()
-                                .create(true)
-                                .truncate(true)
-                                .write(true)
-                                .open(tj.as_path())?;
-            for ln in mkey.1.clone() {
-                let nameonly = ln.substring(0, ln.len() - 3);
-                let modfmt = format!("mod {};\n", nameonly.clone());
-                let usingfmt = format!("pub use {}::*;\n", nameonly.clone());
-                tjfile.write_all(modfmt.as_bytes())?;
-                tjfile.write_all(usingfmt.as_bytes())?;
-                tjfile.write_all("\r\n".as_bytes())?;
+            let tjfile = if self.ctx.codegen_conf.always_override {
+                                        OpenOptions::new()
+                                                .write(true)
+                                                .append(false)
+                                                .create(true)
+                                                .truncate(true)
+                                                .open(tj.as_path())
+                                    } else {
+                                        OpenOptions::new()
+                                                .write(true)
+                                                .append(false)
+                                                .create_new(true)
+                                                .truncate(true)
+                                                .open(tj.as_path())
+                                    };
+            match tjfile {
+                Ok(mjfile) => {
+                    let mut mutfile = mjfile;
+                    for ln in mkey.1.clone() {
+                        let nameonly = ln.substring(0, ln.len() - 3);
+                        let modfmt = format!("mod {};\n", nameonly.clone());
+                        let usingfmt = format!("pub use {}::*;\n", nameonly.clone());
+                        mutfile.write_all(modfmt.as_bytes())?;
+                        mutfile.write_all(usingfmt.as_bytes())?;
+                        mutfile.write_all("\r\n".as_bytes())?;
+                    }
+                    mutfile.flush()?;
+                }
+                Err(err) => {
+                    if err.kind() == ErrorKind::AlreadyExists {
+                        log::info!("Skipped the existed file.");
+                    } else {
+                        log::info!("File was not create/opened. Becuase {}", err);
+                    }
+                }
             }
-            tjfile.flush()?;
+            
         }
 
         let main = src.join("main.rs");
@@ -766,15 +869,36 @@ impl CodeGenerator {
 
 
     fn write_content(&self, filename: &String, content: &str) -> std::io::Result<()>{
-
-        let mut file = OpenOptions::new()
+        
+        let file = if self.ctx.codegen_conf.always_override {
+                      OpenOptions::new()
                                 .write(true)
                                 .append(false)
                                 .create(true)
                                 .truncate(true)
-                                .open(filename)?;
-        file.write_all(content.as_bytes())?;
-        file.flush()?;
+                                .open(filename)
+                    } else {
+                        OpenOptions::new()
+                                .write(true)
+                                .append(false)
+                                .create_new(true)
+                                .truncate(true)
+                                .open(filename)
+                    };
+        match file {
+            Ok(mjfile) => {
+                let mut mutfile = mjfile;
+                mutfile.write_all(content.as_bytes())?;
+                mutfile.flush()?;
+            }
+            Err(err) => {
+                if err.kind() == ErrorKind::AlreadyExists {
+                    log::info!("Skipped the existed file.");
+                } else {
+                    log::info!("File was not create/opened. Becuase {}", err);
+                }
+            }
+        };
         Ok(())
     }
 
@@ -790,7 +914,10 @@ pub fn parse_data_type_as_rust_type(dt: &String) -> String {
         "bigint" => "i64".to_string(),
         "bigint unsigned" => "u64".to_string(),
         "tinyint" => "bool".to_string(),
-        "bit" => "bool".to_string(),
+        "tinyint unsigned" => "bool".to_string(),
+        "tinyint signed" => "bool".to_string(),
+        "boolean" => "bool".to_string(),
+        "bit" => "i32".to_string(),
         "longtext" => "String".to_string(),
         "text" => "String".to_string(),
         "mediumtext" => "String".to_string(),

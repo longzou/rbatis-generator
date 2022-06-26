@@ -47,7 +47,7 @@ async fn main() -> std::io::Result<()> {
     cg.load_tables().await;
     cg.generate();
     cg.write_out()?;
-    
+
     std::thread::sleep_ms(500u32);
     Ok(())
 }

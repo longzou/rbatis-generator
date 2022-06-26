@@ -169,10 +169,21 @@ impl AppConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct  SimpleFuncation {
+    pub fun_name: String,
+    pub condition: String,
+    pub is_list: bool,
+    pub is_paged: bool,
+    pub is_self: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct TableConfig {
     pub name: String,
     pub struct_name: String,
     pub primary_key: String,
+    pub tree_parent_field: Option<String>,
+    pub tree_root_value: Option<String>,
     pub api_handler_name: String,
     pub all_field_option: bool,
     pub update_skip_fields: Option<String>,
@@ -180,6 +191,7 @@ pub struct TableConfig {
     pub page_query: bool,
     pub logic_deletion: bool,
     pub generate_handler: bool,
+    pub simple_funclist: Vec<SimpleFuncation>,  //定义简单的查询方法，根据指定的字段来进行简单的查询
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -341,6 +353,174 @@ impl QueryConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct Relationship {
+    pub table_name: Option<String>,
+    pub join_field: Option<String>,
+    pub major_field: Option<String>,
+    pub middle_table: Option<String>,
+}
+
+impl Relationship {
+    
+    fn load_from_yaml_node(node: &Yaml) -> Vec<Self> {
+        let mut list = vec![];
+        match node.as_vec() {
+            Some(ns) => {
+                for nd in ns.clone() {
+                    let mut st = Self::default();
+                    let rl = Self::load_by_node(&nd);
+                    list.push(rl);
+                }
+            }
+            None => {
+            }
+        };
+        list
+    }
+
+    fn load_by_node(ts: &Yaml) -> Self {
+        Relationship {
+            table_name: match ts["table-name"].as_str() {
+                Some(tr) => {
+                    Some(tr.to_string())
+                }
+                None => {
+                    None
+                }
+            },
+            join_field: match ts["join-field"].as_str() {
+                Some(tr) => {
+                    Some(tr.to_string())
+                }
+                None => {
+                    None
+                }
+            },
+            major_field: match ts["major-field"].as_str() {
+                Some(tr) => {
+                    Some(tr.to_string())
+                }
+                None => {
+                    // If the major field was not defined, we will use the same value of join-field
+                    match ts["join-field"].as_str() {
+                        Some(tr) => {
+                            Some(tr.to_string())
+                        }
+                        None => {
+                            None
+                        }
+                    }
+                }
+            },
+            middle_table: match ts["middle-table"].as_str() {
+                Some(tr) => {
+                    Some(tr.to_string())
+                }
+                None => {
+                    None
+                }
+            },
+        }
+    }
+}
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct RelationConfig {
+    pub struct_name: String,
+    pub major_table: String,
+    pub extend_major: bool,
+    pub one_to_one: Vec<Relationship>,
+    pub one_to_many: Vec<Relationship>,
+    pub generate_select: bool,
+    pub generate_save: bool,
+    // pub generate_update: bool,
+    pub generate_delete: bool,
+    pub generate_handler: bool,
+    pub api_handler_name: Option<String>,
+}
+
+impl RelationConfig {
+    
+    fn load_from_yaml_node(node: &Yaml) -> Vec<Self> {
+        let mut list = vec![];
+        match node.as_vec() {
+            Some(ns) => {
+                for nd in ns.clone() {
+                    let mut st = Self::default();
+                    st.load_by_node(&nd);
+                    list.push(st);
+                }
+            }
+            None => {
+            }
+        };
+        log::info!("Loaded relations: {}", list.len());
+        list
+    }
+
+    fn load_by_node(&mut self, node: &Yaml) {
+        self.struct_name = node["struct-name"].as_str().unwrap_or_default().to_string();
+        self.major_table = node["major-table"].as_str().unwrap_or_default().to_string();
+        log::info!("Loaded the struct name: {}", self.struct_name.clone());
+        self.api_handler_name = match node["api-handler-name"].as_str() {
+            Some (tstr) => Some(tstr.to_string()),
+            None => {
+                let stname = snake_case(self.struct_name.clone().as_str());
+                match stname.find("_") {
+                    Some(us) => {
+                        Some(stname.substring(us + 1, stname.len()).to_string())
+                    }
+                    None => {
+                        Some(stname)
+                    }
+                }
+            }
+        };
+
+        // Relationship will be generate basic select to load one-row, 
+        // Relationships don't fetch list or pages
+        // If you want to load more by relationship, we suggest to write the query directly.
+        self.generate_handler = node["generate-handler"].as_bool().unwrap_or_default();
+        self.generate_select = node["generate-select"].as_bool().unwrap_or_default();
+        self.generate_save = node["generate-save"].as_bool().unwrap_or_default();
+        // self.generate_update = node["generate-update"].as_bool().unwrap_or_default();
+        self.generate_delete = node["generate-delete"].as_bool().unwrap_or_default();
+
+        // Extend the major table as field
+        self.extend_major = node["extend-major"].as_bool().unwrap_or_default();
+
+        
+        self.one_to_one = match node["one-to-one"].as_vec() {
+            Some(vts) => {
+                let mut rels = vec![];
+                for ts in vts {
+                    let t = Relationship::load_by_node(ts);
+                    rels.push(t);
+                }
+                rels
+            }
+            None => {
+                vec![]
+            },
+        };
+
+        self.one_to_many = match node["one-to-many"].as_vec() {
+            Some(vts) => {
+                let mut rels = vec![];
+                for ts in vts {
+                    let t = Relationship::load_by_node(ts);
+                    rels.push(t);
+                }
+                rels
+            }
+            None => {
+                vec![]
+            },            
+        };
+    }
+}
+
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct CodeGenConfig {
     pub app_authors: String,
     pub app_edition: String,
@@ -349,6 +529,8 @@ pub struct CodeGenConfig {
     pub output_path: String,
     pub entity_in_one_file: bool,
     pub generate_for_lib: bool,
+    pub always_override: bool,
+    pub config_template_generate: Option<String>,
     pub always_generate_handler: bool,
     pub always_generate_entity: bool,
     pub api_handler_prefix: String,
@@ -357,6 +539,7 @@ pub struct CodeGenConfig {
     pub database_url: String,
     pub tables: Vec<TableConfig>,
     pub queries: Vec<QueryConfig>,
+    pub relations: Vec<RelationConfig>,
 }
 
 
@@ -415,6 +598,22 @@ impl CodeGenConfig {
                                 None
                             }
                         },
+                        tree_parent_field: match tbn["tree-parent-field"].as_str() {
+                            Some(tstr) => {
+                                Some(tstr.to_string())
+                            }
+                            None => {
+                                None
+                            }
+                        },
+                        tree_root_value: match tbn["tree-root-value"].as_str() {
+                            Some(tstr) => {
+                                Some(tstr.to_string())
+                            }
+                            None => {
+                                Some("null".to_string())
+                            }
+                        },
                         all_field_option: match tbn["all-field-option"].as_bool() {
                             Some(ff) => {
                                 ff
@@ -434,6 +633,39 @@ impl CodeGenConfig {
                                 gh
                             }
                         },
+                        simple_funclist: match tbn["simple-funclist"].as_vec() {
+                            Some(listnode) => {
+                                let mut funclist = vec![];
+                                for mt in listnode {
+                                    let funcname = match mt["func-name"].as_str() {
+                                        Some(fcn) => {
+                                            Some(fcn.to_string())
+                                        }
+                                        None => None
+                                    };
+                                    let condition = match mt["condition"].as_str() {
+                                        Some(fcn) => {
+                                            Some(fcn.to_string())
+                                        }
+                                        None => None
+                                    };
+                                    if funcname.is_some() && condition.is_some() {
+                                        let func = SimpleFuncation {
+                                            fun_name: funcname.unwrap_or_default(),
+                                            condition: condition.unwrap_or_default(),
+                                            is_list: mt["list"].as_bool().unwrap_or_default(),
+                                            is_paged: mt["paged"].as_bool().unwrap_or_default(),
+                                            is_self: mt["self-func"].as_bool().unwrap_or_default(),
+                                        };
+                                        funclist.push(func);
+                                    }
+                                }
+                                funclist
+                            }
+                            None => {
+                                vec![]
+                            }
+                        }
                     });
                 }
             }
@@ -441,6 +673,8 @@ impl CodeGenConfig {
 
             }
         };
+
+        let relations = RelationConfig::load_from_yaml_node(&node["relations"]);
 
         let queries = QueryConfig::load_from_yaml_node(&node["queries"]);
 
@@ -464,6 +698,11 @@ impl CodeGenConfig {
                 s.to_owned()
             } else {
                 "0.0.1".to_string()
+            },
+            config_template_generate: if let Some(s) = node["config-template-generate"].as_str() {
+                Some(s.to_owned())
+            } else {
+                None
             },
             output_path: if let Some(s) = node["output-path"].as_str() {
                 s.to_owned()
@@ -502,8 +741,14 @@ impl CodeGenConfig {
             } else {
                 true
             },
+            always_override:  if let Some(s) = node["always-override"].as_bool() {
+                s.to_owned()
+            } else {
+                true
+            },
             tables: tables,
             queries: queries,
+            relations: relations,
         }
     }
 }

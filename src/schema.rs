@@ -25,9 +25,6 @@ impl TableInfo {
         rb_args.push(rbson::to_bson(table_schema).unwrap_or_default()) ;
         rb_args.push(rbson::to_bson(table_name).unwrap_or_default()) ;
 
-        rb.new_wrapper()
-            .r#if(true, |wp| wp.and().eq("column", false));
-        
         return rb.fetch::<Option<TableInfo>>(&
         "SELECT table_catalog as table_catalog, table_schema as table_schema, table_type as table_type, 
             table_name as table_name, table_collation as table_collation, table_comment as table_comment, 

@@ -8,8 +8,12 @@ use rbatis::rbatis::{Rbatis};
 use serde_derive::{Deserialize, Serialize};
 use chrono::offset::Local;
 use chrono::DateTime;
-use yaml_rust::Yaml;
+use jsonwebtoken::{EncodingKey, DecodingKey, Header};
+// use yaml_rust::Yaml;
+// use actix_web::{web, HttpRequest};
+use std::collections::HashMap;
 
+#[allow(dead_code)]
 pub fn num_to_string (n:i64) -> String {
     let base_codec = ['A','B','C','D','E','F','G','H','J','K','L','M','N','O', 'P','Q','R','S','T','U','V','W','X','Y','Z','2','3','4','5','7','8','9'];
     let len = base_codec.len() as i64;
@@ -24,6 +28,7 @@ pub fn num_to_string (n:i64) -> String {
     result
 }
 
+#[allow(dead_code)]
 pub fn f32_to_decimal(f: f32) -> Option<rbatis::Decimal> {
     match rbatis::Decimal::from_str(format!("{:.2}", f).as_str()) {
         Ok(r) => {
@@ -35,6 +40,7 @@ pub fn f32_to_decimal(f: f32) -> Option<rbatis::Decimal> {
     }
 }
 
+#[allow(dead_code)]
 pub fn decimal_to_f32(dc: Option<rbatis::Decimal>) -> f32 {
     match dc {
         Some(r) => {
@@ -53,6 +59,7 @@ pub fn decimal_to_f32(dc: Option<rbatis::Decimal>) -> f32 {
     }
 }
 
+#[allow(dead_code)]
 pub fn make_decimal_negative(dc: Option<rbatis::Decimal>) -> Option<rbatis::Decimal> {
     match dc {
         Some(r) => {
@@ -71,6 +78,7 @@ pub fn make_decimal_negative(dc: Option<rbatis::Decimal>) -> Option<rbatis::Deci
     }
 }
 
+#[allow(dead_code)]
 pub fn generate_rand_string (len: usize) -> String {
     let mut retkey = "".to_string();
 
@@ -83,67 +91,39 @@ pub fn generate_rand_string (len: usize) -> String {
     retkey.chars().take(len).collect()
 }
 
+#[allow(dead_code)]
 pub fn get_local_timestamp() -> u64 {
     let now = SystemTime::now();
     let date:DateTime<Local> = now.into();
     date.timestamp_millis() as u64
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct  ApiResult <T> {
-    pub status: i32,
-    pub message: String,
-    pub data: Option<T>,
-    pub timestamp: Option<u64>,
+#[allow(dead_code)]
+pub fn parse_query(query_string: &str) -> HashMap<String, String> {
+    if query_string.is_empty() {
+        return HashMap::new();
+    }
+    let q_a: Vec<&str> = query_string.split("&").collect();
+    let mut res: HashMap<String, String> = HashMap::new();
+    use percent_encoding::percent_decode;
+    for s in q_a {
+        // let ss: &str = s;
+        let kv: Vec<&str> = s.split("=").collect();
+        let kvalue = percent_decode(kv[1].as_bytes())
+        .decode_utf8()
+        .unwrap();
+        res.insert(kv[0].to_string(), kvalue.to_string());
+    }
+    res
 }
 
-impl<T> ApiResult<T> {
-
-    pub fn ok (dt: T) -> Self {
-        ApiResult {
-            status: 200,
-            message: "OK".to_string(),
-            data: Option::Some(dt),
-            timestamp: Some(get_local_timestamp())
-        }
-    }
-
-    pub fn error (code: i32, msg: &String) -> Self {
-        ApiResult {
-            status: code,
-            message: msg.to_owned(),
-            data: None,
-            timestamp: Some(get_local_timestamp())
-        }
-    }
-
-    pub fn new (code: i32, msg: &String, data: T, ts: u64) -> Self {
-        ApiResult {
-            status: code,
-            message: msg.to_owned(),
-            data: Some(data),
-            timestamp: Some(ts)
-        }
+#[allow(dead_code)]
+pub fn get_hash_value(query_params: &HashMap<String, String>, key: &str) -> String {
+    match query_params.get(key) {
+        Some(val) => val.clone(),
+        None => "".to_owned(),
     }
 }
-
-#[derive(Debug, Clone, Default)]
-pub struct AppConfig {
-    pub db_conf: DatabaseConfig,
-    pub webserver_conf: WebServerConfig,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct WebServerConfig {
-    pub port: i64,
-}
-
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct DatabaseConfig {
-    pub url: String,
-}
-
 
 lazy_static!{
     pub static ref RB: Rbatis = {
@@ -152,7 +132,7 @@ lazy_static!{
     };
 }
 
-
+#[allow(dead_code)]
 pub fn get_rbatis() -> &'static Rbatis {
     // 使用MaybeUninit延迟初始化
     static mut STATIC_RB: MaybeUninit<Rbatis> = MaybeUninit::uninit();
@@ -181,6 +161,27 @@ pub fn get_rbatis() -> &'static Rbatis {
 }
 
 
+#[derive(Debug, Clone, Default)]
+pub struct AppConfig {
+    pub db_conf: DatabaseConfig,
+    pub webserver_conf: WebServerConfig,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WebServerConfig {
+    pub port: i64,
+    pub rsa_key: String,
+    pub rsa_cert: String,
+    pub rsa_password_private_key: String,
+    pub rsa_password_public_key: String,
+}
+
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct DatabaseConfig {
+    pub url: String,
+}
+
 impl AppConfig {
     pub fn get() -> &'static Mutex<AppConfig> {
       // 使用MaybeUninit延迟初始化
@@ -191,7 +192,7 @@ impl AppConfig {
       ONCE.call_once(|| unsafe {
           CONF.as_mut_ptr().write(Mutex::new(AppConfig {
             db_conf: DatabaseConfig { url: "".to_string() },
-            webserver_conf: WebServerConfig { port: 10089i64 },
+            webserver_conf: WebServerConfig { port: 10089i64, rsa_cert: String::new(), rsa_key: String::new(), rsa_password_private_key: String::new(), rsa_password_public_key: String::new() },
           }));
       });
       unsafe { &*CONF.as_ptr() }
@@ -235,6 +236,26 @@ impl AppConfig {
             s.to_owned()
         } else {
             10089i64
+        },
+        rsa_key: if let Some(s) = web["rsa_key"].as_str() {
+            s.to_owned()
+        } else {
+            String::new()
+        },
+        rsa_cert: if let Some(s) = web["rsa_cert"].as_str() {
+            s.to_owned()
+        } else {
+            String::new()
+        },
+        rsa_password_private_key: if let Some(s) = web["rsa_password_private_key"].as_str() {
+            s.to_owned()
+        } else {
+            String::new()
+        },
+        rsa_password_public_key: if let Some(s) = web["rsa_password_public_key"].as_str() {
+            s.to_owned()
+        } else {
+            String::new()
         }
       };
       
@@ -242,5 +263,47 @@ impl AppConfig {
       self.webserver_conf = webconf;
     }
   }
+
+
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserClaims {
+    pub aud: String,
+    pub sub: String,
+    pub exp: usize,
+}
+
+impl UserClaims {
+
+    #[allow(dead_code)]
+    pub fn encode(&self) -> Option<String> {
+        let conf = AppConfig::get().lock().unwrap().to_owned();
+        
+        match jsonwebtoken::encode(&Header::default(), &self, &EncodingKey::from_secret(conf.webserver_conf.rsa_cert.as_bytes())) {
+            Ok(t) => Some(t),
+            Err(_) => None
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn decode(token: &String) -> Option<Self> {
+        let conf = AppConfig::get().lock().unwrap().to_owned();
+        let validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+        match jsonwebtoken::decode::<UserClaims>(&token, &DecodingKey::from_secret(conf.webserver_conf.rsa_cert.as_bytes()), &validation) {
+            Ok(c) => {
+                Some(c.claims)
+            },
+            Err(err) => {
+                match *err.kind() {
+                    jsonwebtoken::errors::ErrorKind::InvalidToken => log::error!("Token is invalid"), // Example on how to handle a specific error
+                    jsonwebtoken::errors::ErrorKind::InvalidIssuer => log::error!("Issuer is invalid"), // Example on how to handle a specific error
+                    _ => log::error!("Some other errors"),
+                };
+
+                None
+            }
+        }
+    }
+}
 
 "#;

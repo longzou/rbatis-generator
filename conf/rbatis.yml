@@ -8,9 +8,11 @@ codegen:
   app-authors: Long(long.zou@gmail.com)
   app-edition: "2021"
   app-version: 0.1.0
-  output-path: d:/temp/chimes-rust/
+  output-path: d:/temp/chimes-rust-v2/
   always-generate-handler: true
   always-generate-entity: true
+  always-override: true
+  config-template-generate: D:/gitspaces/longzou/rustspace/rust/rbatisgen/conf/rbatis.yml
   api-handler-prefix: /api/v1
   webserver-port: "10999"
   schema-name: chimesrust
@@ -24,9 +26,17 @@ codegen:
       page-query: true
       logic-deletion: true
       api-handler-name: user
+      simple-funclist:
+      - func-name: load_username
+        condition: username
+        list: false
+        self-func: false
+        paged: false
     - name: chimes_menu
       struct-name: ChimesMenuInfo
       primary-key: menu_id
+      tree-parent-field: pid
+      tree-root-value: "null"
       all-field-option: true
       auto-generate-key: menu_id
       update-skip-fields: menu_id, update_time, create_time
@@ -57,6 +67,7 @@ codegen:
     - name: chimes_dept
       struct-name: ChimesDeptInfo
       primary-key: dept_id
+      tree-parent-field: pid
       all-field-option: true
       auto-generate-key: dept_id
       update-skip-fields: dept_id, create_time, update_time
@@ -130,7 +141,7 @@ codegen:
       generate-handler: false
     - name: chimes_roles_menus
       struct-name: ChimesRoleMenuInfo
-      primary-key: role_id, Menu_id
+      primary-key: role_id, menu_id
       all-field-option: true
       update-seletive: false
       page-query: false
@@ -144,10 +155,37 @@ codegen:
       page-query: false
       logic-deletion: false
       generate-handler: false
+    - name: chimes_profile
+      struct-name: ChimeProfileInfo
+      primary-key: user_id
+      all-field-option: true
+      update-seletive: true
+      page-query: true
+      logic-deletion: false
+      generate-handler: false
+      api-handler-name: profile
+  relations:
+    - struct-name: ChimesUserRoles
+      major-table: chimes_user
+      extend-major: true
+      generate-handler: true
+      generate-select: true
+      generate-save: true
+      generate-delete: true
+      one-to-one:
+        - table-name: chimes_profile
+          join-field: user_id
+          major-field: user_id
+      one-to-many:
+        - table-name: chimes_role
+          join-field: role_id
+          major-field: user_id
+          middle-table: chimes_users_roles
   queries:
     - base-sql: SELECT p.*, cu.username FROM chimes_permission p LEFT JOIN chimes_roles_permissions rp ON p.id = rp.permission_id  LEFT JOIN chimes_users_roles cur ON rp.role_id = cur.role_id  LEFT JOIN chimes_user cu ON cur.user_id  = cu.user_id  WHERE p.api_method = ? AND p.api_pattern  = ? AND cu.username  = ? 
       struct-name: QueryUserPermission
-      generate-handler: false
+      generate-handler: true
+      single-result: false
       api-handler-name: user
       params:
         - column-names: api_method
@@ -159,8 +197,26 @@ codegen:
         - column-names: username
           column-types: varchar
           default-value: admin
+    - base-sql: SELECT p.* FROM chimes_menu p INNER JOIN chimes_roles_menus rp ON p.menu_id = rp.menu_id INNER JOIN chimes_users_roles cur ON rp.role_id = cur.role_id  INNER JOIN chimes_user cu ON cur.user_id  = cu.user_id AND cu.username = ?
+      struct-name: QueryUserMenus
+      generate-handler: false
+      single-result: false
+      api-handler-name: menu
+      params:
+        - column-names: username
+          column-types: varchar
+          default-value: admin
 
-
+just-test:
+  bool-variant:
+  - true
+  - false
+  - true
+  - true
+  int-variant:
+  - 120
+  - 330
+  - 450
 
 
 

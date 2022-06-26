@@ -4,9 +4,6 @@ extern crate actix_web;
 
 // #[macro_use]
 // extern crate wechat;
-#[macro_use]
-use rbatis::Value;
-use rbatis::rbatis::Rbatis;
 
 #[macro_use]
 extern crate lazy_static;
@@ -14,7 +11,7 @@ extern crate lazy_static;
 // use awc::Client;
 
 use actix_web::http::StatusCode;
-use actix_web::{middleware, web, App, HttpRequest, HttpResponse, HttpServer, Result};
+use actix_web::{middleware, App, HttpRequest, HttpResponse, HttpServer, Result};
 
 ${generated_mod_list}
 
@@ -56,7 +53,7 @@ async fn main() -> std::io::Result<()> {
     let conf = appconf.clone();
     drop(appconf);
 
-    let rb = utils::get_rbatis();
+    // let rb = utils::get_rbatis();
 
     // 启动web服务
     start_web_server(&conf.webserver_conf).await
