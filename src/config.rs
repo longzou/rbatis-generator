@@ -180,6 +180,7 @@ pub struct  SimpleFuncation {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct TableConfig {
     pub name: String,
+    pub comment: String,
     pub struct_name: String,
     pub primary_key: String,
     pub tree_parent_field: Option<String>,
@@ -208,6 +209,7 @@ pub struct QueryConfig {
     pub base_sql: String,
     pub single_result: bool,
     pub struct_name: String,
+    pub comment: String,
     pub api_handler_name: String,
     pub generate_handler: bool,
     pub params: Vec<QueryParam>,
@@ -234,6 +236,7 @@ impl QueryConfig {
 
     fn load_by_node(&mut self, node: &Yaml) {
         self.struct_name = node["struct-name"].as_str().unwrap_or_default().to_string();
+        self.comment = node["comment"].as_str().unwrap_or_default().to_string();
         self.api_handler_name = match node["api-handler-name"].as_str() {
             Some (tstr) => tstr.to_string(),
             None => {
@@ -358,6 +361,7 @@ pub struct Relationship {
     pub join_field: Option<String>,
     pub major_field: Option<String>,
     pub middle_table: Option<String>,
+    pub readonly: bool,
 }
 
 impl Relationship {
@@ -420,11 +424,20 @@ impl Relationship {
                     None
                 }
             },
+            readonly: match ts["readonly"].as_bool() {
+                Some(tr) => {
+                    tr
+                }
+                None => {
+                    false
+                }
+            },
         }
     }
 }
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RelationConfig {
+    pub comment: String,
     pub struct_name: String,
     pub major_table: String,
     pub extend_major: bool,
@@ -460,6 +473,7 @@ impl RelationConfig {
     fn load_by_node(&mut self, node: &Yaml) {
         self.struct_name = node["struct-name"].as_str().unwrap_or_default().to_string();
         self.major_table = node["major-table"].as_str().unwrap_or_default().to_string();
+        self.comment = node["comment"].as_str().unwrap_or_default().to_string();
         log::info!("Loaded the struct name: {}", self.struct_name.clone());
         self.api_handler_name = match node["api-handler-name"].as_str() {
             Some (tstr) => Some(tstr.to_string()),
@@ -530,6 +544,8 @@ pub struct CodeGenConfig {
     pub entity_in_one_file: bool,
     pub generate_for_lib: bool,
     pub always_override: bool,
+    pub allow_number_widecard: bool,
+    pub allow_bool_widecard: bool,
     pub config_template_generate: Option<String>,
     pub always_generate_handler: bool,
     pub always_generate_entity: bool,
@@ -559,6 +575,15 @@ impl CodeGenConfig {
                 for tbn in t {
                     tables.push(TableConfig {
                         name: tbn["name"].as_str().unwrap_or_default().to_string(),
+                        comment: match tbn["comment"].as_str() {
+                            Some(tstr) => {
+                                tstr.to_string()
+                            }
+                            None => {
+                                log::info!("Unable to read comment: {}", tbn["struct-name"].as_str().unwrap_or_default().to_string());
+                                tbn["struct-name"].as_str().unwrap_or_default().to_uppercase()
+                            }
+                        },
                         struct_name: tbn["struct-name"].as_str().unwrap_or_default().to_string(),
                         primary_key: tbn["primary-key"].as_str().unwrap_or_default().to_string(),
                         api_handler_name: match tbn["api-handler-name"].as_str() {
@@ -731,6 +756,16 @@ impl CodeGenConfig {
                 false
             },
             generate_for_lib: if let Some(s) = node["generate-for-lib"].as_bool() {
+                s.to_owned()
+            } else {
+                false
+            },
+            allow_bool_widecard: if let Some(s) = node["allow-bool-widecard"].as_bool() {
+                s.to_owned()
+            } else {
+                false
+            },
+            allow_number_widecard: if let Some(s) = node["allow-number-widecard"].as_bool() {
                 s.to_owned()
             } else {
                 false

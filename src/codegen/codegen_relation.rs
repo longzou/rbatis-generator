@@ -14,7 +14,7 @@ pub fn parse_relation_as_file(ctx: &GenerateContext, rel: &RelationConfig) -> Op
     let tbc = ctx.get_table_conf(&rel.major_table.clone());
     match tbc {
         Some(tbconf) => {
-            let mut usinglist = CodeGenerator::get_default_entity_using(tbconf.page_query);
+            let mut usinglist = CodeGenerator::get_default_entity_using(ctx, tbconf.page_query);
         
             usinglist.push(format!("crate::entity::{}", tbconf.struct_name));
             for rl in rel.one_to_one.clone() {
@@ -63,7 +63,7 @@ pub fn parse_relation_as_file(ctx: &GenerateContext, rel: &RelationConfig) -> Op
 /**
  * 解析关系并生成文件
  */
-pub fn parse_relation_handlers_as_file(ctx: &GenerateContext, rel: &RelationConfig) -> Option<RustFileImpl> {
+pub fn parse_relation_handlers_as_file(ctx: &mut GenerateContext, rel: &RelationConfig) -> Option<RustFileImpl> {
     let st = parse_relation_as_struct(ctx, rel);
     let tbc = ctx.get_table_conf(&rel.major_table.clone());
     
@@ -112,7 +112,9 @@ pub fn parse_relation_handlers_as_file(ctx: &GenerateContext, rel: &RelationConf
             if rel.generate_save {
                 let funcsave = generate_handler_save_for_relation(ctx, rel);
                 funclist.push(funcsave);
-            }            
+            }
+
+            ctx.add_permission_for_relation(rel, &funclist);
 
             let rfi = RustFileImpl { 
                 file_name: snake_case(rel.struct_name.clone().as_str()) + ".rs",
@@ -145,7 +147,7 @@ pub fn parse_relation_as_struct(ctx: &GenerateContext, rel: &RelationConfig) -> 
     let cols = ctx.get_table_columns(&tbl_name.clone());
 
     let mut fields = if rel.extend_major {
-        let parsed_fields = parse_column_list(ctx, &tbconf, &cols, &mut columns);
+        let parsed_fields = parse_column_list(ctx, &tbconf, &cols, &mut columns, false);
         if columns.ends_with(",") {
             columns = columns.substring(0, columns.len() - 1).to_string();
         }
@@ -157,7 +159,9 @@ pub fn parse_relation_as_struct(ctx: &GenerateContext, rel: &RelationConfig) -> 
             column_name: String::new(), 
             field_name: safe_struct_field_name(&fname), 
             field_type: tbconf.struct_name.clone(), 
-            is_option: true
+            is_option: true,
+            orignal_field_name: None,
+            annotations: vec![],
         }]
     };
 
@@ -165,12 +169,15 @@ pub fn parse_relation_as_struct(ctx: &GenerateContext, rel: &RelationConfig) -> 
         let rltbc = ctx.get_table_conf(&rl.table_name.unwrap_or_default());
         if rltbc.is_some() {
             let rltcnf = rltbc.unwrap();
+            let fdname = safe_struct_field_name(&rltcnf.api_handler_name);
             let rlfd = RustStructField { 
                 is_pub: true, 
                 column_name: rl.join_field.unwrap_or_default(), 
-                field_name: safe_struct_field_name(&rltcnf.api_handler_name),
+                field_name: fdname.clone(),
                 field_type: rltcnf.struct_name.clone(), 
-                is_option: true
+                is_option: true,
+                orignal_field_name: Some(fdname.clone()),
+                annotations: vec![],
             };
             fields.push(rlfd);
         }
@@ -180,12 +187,15 @@ pub fn parse_relation_as_struct(ctx: &GenerateContext, rel: &RelationConfig) -> 
         let rltbc = ctx.get_table_conf(&rl.table_name.unwrap_or_default());
         if rltbc.is_some() {
             let rltcnf = rltbc.unwrap();
+            let fdname = format!("{}s", safe_struct_field_name(&rltcnf.api_handler_name));
             let rlfd = RustStructField {
                 is_pub: true, 
                 column_name: rl.join_field.unwrap_or_default(), 
-                field_name: format!("{}s", safe_struct_field_name(&rltcnf.api_handler_name)), 
+                field_name: fdname.clone(), 
                 field_type: format!("Vec<{}>", rltcnf.struct_name.clone()), 
-                is_option: false
+                is_option: false,
+                orignal_field_name: Some(fdname.clone()),
+                annotations: vec!["#[serde(default)]".to_string()],
             };
             fields.push(rlfd);
         }
@@ -243,7 +253,7 @@ fn generate_func_from_major_table(ctx: &GenerateContext, rel: &RelationConfig) -
     if rel.extend_major {
         let mut columns = String::new();
         let cols = ctx.get_table_columns(&tbl_name.clone());
-        let parsed_fields = parse_column_list(ctx, &tbconf, &cols, &mut columns);
+        let parsed_fields = parse_column_list(ctx, &tbconf, &cols, &mut columns, false);
         for fd in parsed_fields {
             let fname = fd.field_name.clone();
             body.push(format!("{}: param.{}.clone(),", safe_struct_field_name(&fname), safe_struct_field_name(&fname)));
@@ -288,7 +298,10 @@ fn generate_func_from_major_table(ctx: &GenerateContext, rel: &RelationConfig) -
         return_type: Some("Self".to_string()), 
         params: params,
         bodylines: body, 
-        macros: vec!["#[allow(dead_code)]".to_string()]
+        macros: vec!["#[allow(dead_code)]".to_string()],
+        comment: Some(format!("实体转{}", rel.comment.clone())),
+        api_method: None,
+        api_pattern: None,        
     }
 }
 
@@ -302,11 +315,39 @@ fn generate_func_to_major_table(ctx: &GenerateContext, rel: &RelationConfig) -> 
     if rel.extend_major {
         let mut columns = String::new();
         let cols = ctx.get_table_columns(&tbl_name.clone());
-        let parsed_fields = parse_column_list(ctx, &tbconf, &cols, &mut columns);
+        let parsed_fields = parse_column_list(ctx, &tbconf, &cols, &mut columns, false);
+        for otp in rel.one_to_one.clone() {
+            let tpconf = ctx.get_table_conf(&otp.table_name.clone().unwrap_or_default());
+            if tpconf.is_some() {
+                let tpc = tpconf.unwrap();
+                let fdname = safe_struct_field_name(&otp.join_field.clone().unwrap_or_default());
+                let mjname = safe_struct_field_name(&otp.major_field.clone().unwrap_or_default());
+                body.push(format!("let self_{} = match self.{}.clone() {{", fdname.clone(),  tpc.api_handler_name.clone()));
+                body.push(format!("Some(np) => np.{}.clone(),", fdname.clone()));
+                body.push(format!("None => self.{}.clone(),", mjname.clone()));
+                body.push(format!("}};"));
+            }
+        }
         body.push(format!("{} {{", tbconf.struct_name.clone()));
         for fd in parsed_fields {
             let fname = fd.field_name.clone();
-            body.push(format!("{}: self.{}.clone(),", safe_struct_field_name(&fname), safe_struct_field_name(&fname)));
+            let mut found = None;
+            for otp in rel.one_to_one.clone() {
+                let tpconf = ctx.get_table_conf(&otp.table_name.clone().unwrap_or_default());
+                if tpconf.is_some() {
+                    let tpc = tpconf.unwrap();
+                    let fdname = safe_struct_field_name(&otp.join_field.clone().unwrap_or_default());
+                    // body.push(format!("let self_{} = self.{}.{}.clone();", fdname.clone(),  tpc.api_handler_name.clone(), fdname.clone()));
+                    let sname = format!("self_{}", fdname.clone());
+                    if Some(fd.column_name.clone()) == otp.join_field {
+                        found = Some(fdname.clone());
+                        body.push(format!("{}: {},", safe_struct_field_name(&fname), sname.clone()));
+                    }
+                }
+            }
+            if found.is_none() {
+                body.push(format!("{}: self.{}.clone(),", safe_struct_field_name(&fname), safe_struct_field_name(&fname)));
+            }
         }
         body.push(format!("}}"));
     } else {
@@ -331,7 +372,10 @@ fn generate_func_to_major_table(ctx: &GenerateContext, rel: &RelationConfig) -> 
         return_type: Some(tbconf.struct_name.clone()), 
         params: params,
         bodylines: body, 
-        macros: vec!["#[allow(dead_code)]".to_string()]
+        macros: vec!["#[allow(dead_code)]".to_string()],
+        comment: Some(format!("{}转实体对象", rel.comment.clone())),
+        api_method: None,
+        api_pattern: None,
     }
 }
 
@@ -483,7 +527,10 @@ fn generate_func_from_pkey_for_relation(ctx: &GenerateContext, tbl: &RelationCon
         return_type: Some("Self".to_string()), 
         params: params, 
         bodylines: body,
-        macros: vec!["#[allow(dead_code)]".to_string()]
+        macros: vec!["#[allow(dead_code)]".to_string()],
+        comment: Some(format!("{}按ID加载", tbl.comment.clone())),
+        api_method: None,
+        api_pattern: None,
     }
 }
 
@@ -527,7 +574,7 @@ fn generate_func_update_for_relation(ctx: &GenerateContext, tbl: &RelationConfig
     body.push(format!("}}")); // end of if
     body.push(format!("}}")); // end of if
     body.push(format!("else {{"));
-    body.push(format!("ret = match self_{}.update(rb).await {{", tbconf.api_handler_name.clone()));
+    body.push(format!("ret = match self_{}.update_selective(rb).await {{", tbconf.api_handler_name.clone()));
     body.push(format!("Ok(_rs) => {{")); //  begin of Ok
     body.push(format!("None"));
     body.push(format!("}}")); //  end of Ok
@@ -540,7 +587,7 @@ fn generate_func_update_for_relation(ctx: &GenerateContext, tbl: &RelationConfig
 
     for otp in tbl.one_to_one.clone() {
         let tpconf = ctx.get_table_conf(&otp.table_name.clone().unwrap_or_default());
-        if tpconf.is_some() {
+        if !otp.readonly && tpconf.is_some() {
             let tpc = tpconf.unwrap();
             
             let mut optpkcols = ctx.get_table_column_by_primary_key(&otp.table_name.clone().unwrap_or_default());
@@ -617,7 +664,7 @@ fn generate_func_update_for_relation(ctx: &GenerateContext, tbl: &RelationConfig
         let optpkcol = optpkcols.get(0).unwrap();
         let optpkcolname = safe_struct_field_name(&optpkcol.column_name.clone().unwrap_or_default().to_lowercase());
 
-        if tpconf.is_some() {
+        if !otp.readonly && tpconf.is_some() {
             let tpc = tpconf.unwrap();
             body.push(format!("// remove batch for {}.", tpc.struct_name.clone()));
             
@@ -625,7 +672,7 @@ fn generate_func_update_for_relation(ctx: &GenerateContext, tbl: &RelationConfig
             if many_many {
                 body.push(format!("let mut rm_{} = {}::default();", tpc.api_handler_name.clone(), tpc.struct_name.clone()));
                 if tbl.extend_major {
-                    body.push(format!("rm_{}.{} = self.{};", tpc.api_handler_name.clone(), otp.join_field.clone().unwrap_or_default(), otp.major_field.clone().unwrap_or_default()));
+                    body.push(format!("rm_{}.{} = self.{};", tpc.api_handler_name.clone(), otp.major_field.clone().unwrap_or_default(), otp.major_field.clone().unwrap_or_default()));
                 } else {
                     body.push(format!("rm_{}.{} = self.{}.clone().unwrap().{};", tpc.api_handler_name.clone(), 
                                                                 otp.major_field.clone().unwrap_or_default(), 
@@ -721,7 +768,10 @@ fn generate_func_update_for_relation(ctx: &GenerateContext, tbl: &RelationConfig
         return_type: Some("bool".to_string()), 
         params: params, 
         bodylines: body,
-        macros: vec!["#[allow(dead_code)]".to_string()]
+        macros: vec!["#[allow(dead_code)]".to_string()],
+        comment: Some(format!("{}保存", tbl.comment.clone())),
+        api_method: None,
+        api_pattern: None,
     }
 }
 
@@ -748,7 +798,7 @@ fn generate_func_delete_for_relation(ctx: &GenerateContext, tbl: &RelationConfig
     body.push(format!("let mut ret: Option<Error> = None;"));
     for otp in tbl.one_to_one.clone() {
         let tpconf = ctx.get_table_conf(&otp.table_name.unwrap_or_default());
-        if tpconf.is_some() {
+        if !otp.readonly && tpconf.is_some() {
             let tpc = tpconf.unwrap();
             body.push(format!("if ret.is_none() {{"));
             body.push(format!("ret = match self.{}.clone() {{", tpc.api_handler_name.clone()));
@@ -780,7 +830,7 @@ fn generate_func_delete_for_relation(ctx: &GenerateContext, tbl: &RelationConfig
         };
         let majtblconf = ctx.get_table_conf(&otp.table_name.clone().unwrap_or_default());
 
-        if tpconf.is_some() {
+        if !otp.readonly && tpconf.is_some() {
             let mtpc = majtblconf.unwrap();
             let tpc = tpconf.unwrap();
             body.push(format!("// remove batch for {}.", tpc.struct_name.clone()));
@@ -789,7 +839,7 @@ fn generate_func_delete_for_relation(ctx: &GenerateContext, tbl: &RelationConfig
             // if otp.middle_table.clone().is_some() {
             if tbl.extend_major {
                 body.push(format!("let mut rm_{} = {}::default();", tpc.api_handler_name.clone(), tpc.struct_name.clone()));
-                body.push(format!("rm_{}.{} = self.{};", tpc.api_handler_name.clone(), otp.join_field.unwrap_or_default().to_lowercase(), otp.major_field.unwrap_or_default().to_lowercase()));
+                body.push(format!("rm_{}.{} = self.{};", tpc.api_handler_name.clone(), otp.major_field.clone().unwrap_or_default().to_lowercase(), otp.major_field.clone().unwrap_or_default().to_lowercase()));
             } else {
                 body.push(format!("let mut rm_{} = {}::default();", tpc.api_handler_name.clone(), tpc.struct_name.clone()));
                 body.push(format!("rm_{}.{} = self.{}.clone().unwrap().{};", tpc.api_handler_name.clone(), 
@@ -839,7 +889,10 @@ fn generate_func_delete_for_relation(ctx: &GenerateContext, tbl: &RelationConfig
         return_type: Some("bool".to_string()), 
         params: params, 
         bodylines: body,
-        macros: vec!["#[allow(dead_code)]".to_string()]
+        macros: vec!["#[allow(dead_code)]".to_string()],
+        comment: Some(format!("{}删除", tbl.comment.clone())),
+        api_method: None,
+        api_pattern: None,
     }
 }
 
@@ -890,7 +943,8 @@ pub fn generate_handler_load_for_relation(ctx: &GenerateContext, tbl: &RelationC
     body.push(format!("}}"));
     body.push(format!("}}"));
     
-    let postmacro = format!("#[get(\"{}/{}/load{}\")]", ctx.codegen_conf.api_handler_prefix.clone(), tbl.api_handler_name.clone().unwrap_or_default(), macrotext);
+    let url_pattern = format!("{}/{}/load{}", ctx.codegen_conf.api_handler_prefix.clone(), tbl.api_handler_name.clone().unwrap_or_default(), macrotext);
+    let postmacro = format!("#[get(\"{}\")]", url_pattern.clone());
 
     let func_name = format!("{}_rel_load", tbl.api_handler_name.clone().unwrap_or_default());
   
@@ -906,7 +960,10 @@ pub fn generate_handler_load_for_relation(ctx: &GenerateContext, tbl: &RelationC
         return_type: Some("Result<HttpResponse>".to_string()), 
         params: params, 
         bodylines: body,
-        macros: vec![postmacro]
+        macros: vec![postmacro],
+        comment: Some(format!("{}加载", tbl.comment.clone())),
+        api_method: Some("GET".to_string()),
+        api_pattern: Some(url_pattern.clone()),
     }
   }
   
@@ -972,8 +1029,8 @@ pub fn generate_handler_remove_for_relation(ctx: &GenerateContext, tbl: &Relatio
     body.push(format!("}}"));
     body.push(format!("}}"));
     
-    
-    let postmacro = format!("#[post(\"{}/{}/remove{}\")]", ctx.codegen_conf.api_handler_prefix.clone(), tbl.api_handler_name.clone().unwrap_or_default(), macrotext);
+    let url_pattern = format!("{}/{}/remove{}", ctx.codegen_conf.api_handler_prefix.clone(), tbl.api_handler_name.clone().unwrap_or_default(), macrotext);
+    let postmacro = format!("#[post(\"{}\")]", url_pattern.clone());
 
     let func_name = format!("{}_rel_remove", tbl.api_handler_name.clone().unwrap_or_default());
   
@@ -989,7 +1046,10 @@ pub fn generate_handler_remove_for_relation(ctx: &GenerateContext, tbl: &Relatio
         return_type: Some("Result<HttpResponse>".to_string()), 
         params: params, 
         bodylines: body,
-        macros: vec![postmacro]
+        macros: vec![postmacro],
+        comment: Some(format!("{}删除", tbl.comment.clone())),
+        api_method: Some("POST".to_string()),
+        api_pattern: Some(url_pattern.clone()),
     }
   }
 
@@ -1027,7 +1087,8 @@ pub fn generate_handler_save_for_relation(ctx: &GenerateContext, tbl: &RelationC
     body.push(format!("}}"));
     body.push(format!("}}"));
     
-    let postmacro = format!("#[post(\"{}/{}/save\")]", ctx.codegen_conf.api_handler_prefix.clone(), tbl.api_handler_name.clone().unwrap_or_default());
+    let url_pattern = format!("{}/{}/save", ctx.codegen_conf.api_handler_prefix.clone(), tbl.api_handler_name.clone().unwrap_or_default());
+    let postmacro = format!("#[post(\"{}\")]", url_pattern.clone());
 
     let func_name = format!("{}_rel_save", tbl.api_handler_name.clone().unwrap_or_default());
   
@@ -1043,7 +1104,10 @@ pub fn generate_handler_save_for_relation(ctx: &GenerateContext, tbl: &RelationC
         return_type: Some("Result<HttpResponse>".to_string()), 
         params: params, 
         bodylines: body,
-        macros: vec![postmacro]
+        macros: vec![postmacro],
+        comment: Some(format!("{}保存", tbl.comment.clone())),
+        api_method: Some("POST".to_string()),
+        api_pattern: Some(url_pattern.clone()),
     }
   }
 

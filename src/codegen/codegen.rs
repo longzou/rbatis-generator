@@ -9,8 +9,9 @@ use chrono::format::format;
 use rbatis::rbatis::Rbatis;
 use serde_derive::{Deserialize, Serialize};
 use crate::codegen::parse_table_as_struct;
+use crate::permission::ChimesPermissionInfo;
 use crate::tmpl::format_conf_tmpl;
-use crate::config::{CodeGenConfig, TableConfig, get_rbatis, safe_struct_field_name};
+use crate::config::{CodeGenConfig, TableConfig, get_rbatis, safe_struct_field_name, RelationConfig, QueryConfig};
 use crate::schema::{TableInfo, ColumnInfo};
 use substring::Substring;
 
@@ -32,6 +33,7 @@ pub struct GenerateContext {
     pub columns: HashMap<String, Vec<ColumnInfo>>,
     pub structs: Vec<RustStruct>,
     pub queries: Vec<RustStruct>,
+    pub permissions: Vec<RustPermission>,
 }
 
 impl GenerateContext {
@@ -43,6 +45,7 @@ impl GenerateContext {
             columns: HashMap::new(), 
             structs: vec![],
             queries: vec![],
+            permissions: vec![],
         }
     }
 
@@ -85,6 +88,127 @@ impl GenerateContext {
             self.columns.insert(tb.table_name.clone().unwrap(), cols.clone());
         }
     }
+
+    pub fn  add_permission(&mut self, tb: &TableInfo, funclist: &Vec<RustFunc>) {
+        let tbname = tb.table_name.clone().unwrap_or_default();
+        let tbc = self.get_table_conf(&tbname.clone()).unwrap();
+        let alias = tbc.api_handler_name.clone();
+        let name = if tbc.comment.is_empty() {
+            let tbcmt = tb.table_comment.clone().unwrap();
+            if tbcmt.trim().len() > 0 {
+                tbcmt.trim().to_string()
+            } else {
+                tbc.struct_name.to_uppercase()
+            }
+        } else {
+            tbc.comment.clone()
+        };
+
+        let mut children = vec![];
+        for mk in funclist.clone() {
+            if mk.api_method.is_some() {
+                let child = RustPermission { 
+                    name: mk.comment.clone().unwrap_or_default(),
+                    alias: mk.func_name.to_uppercase(),
+                    service_id: self.codegen_conf.app_name.clone(), 
+                    module_id: alias.clone(),
+                    api_pattern: mk.api_pattern.clone(), 
+                    api_method: mk.api_method.clone(), 
+                    api_bypass: Some("user".to_string()), 
+                    children: vec![]
+                };
+                children.push(child);
+            }
+        }
+
+        let perm = RustPermission { 
+            name: name,
+            alias: alias.to_uppercase(),
+            service_id: self.codegen_conf.app_name.clone(), 
+            module_id: alias.clone(), 
+            api_pattern: Some(format!("{}/{}", self.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone())), 
+            api_method: None, 
+            api_bypass: None, 
+            children: children
+        };
+        self.permissions.push(perm);
+    }
+
+    pub fn  add_permission_for_relation(&mut self, tb: &RelationConfig, funclist: &Vec<RustFunc>) {
+        let alias = tb.api_handler_name.clone().unwrap_or_default();
+        let name = if tb.comment.trim().is_empty() {
+            tb.struct_name.to_uppercase()
+        } else {
+            tb.comment.clone()
+        };
+
+        let mut children = vec![];
+        for mk in funclist.clone() {
+            if mk.api_method.is_some() {
+                let child = RustPermission { 
+                    name: mk.comment.clone().unwrap_or_default(),
+                    alias: mk.func_name.to_uppercase(),
+                    service_id: self.codegen_conf.app_name.clone(), 
+                    module_id: alias.clone(),
+                    api_pattern: mk.api_pattern.clone(), 
+                    api_method: mk.api_method.clone(), 
+                    api_bypass: Some("user".to_string()), 
+                    children: vec![]
+                };
+                children.push(child);
+            }
+        }
+
+        let perm = RustPermission { 
+            name: name,
+            alias: alias.to_uppercase(),
+            service_id: self.codegen_conf.app_name.clone(), 
+            module_id: alias.clone(), 
+            api_pattern: Some(format!("{}/{}", self.codegen_conf.api_handler_prefix.clone(), tb.api_handler_name.clone().unwrap_or_default())), 
+            api_method: None, 
+            api_bypass: None, 
+            children: children
+        };
+        self.permissions.push(perm);
+    }
+    
+    pub fn  add_permission_for_query(&mut self, tb: &QueryConfig, funclist: &Vec<RustFunc>) {
+        let alias = tb.api_handler_name.clone();
+        let name = if tb.comment.trim().is_empty() {
+            tb.struct_name.to_uppercase()
+        } else {
+            tb.comment.clone()
+        };
+
+        let mut children = vec![];
+        for mk in funclist.clone() {
+            if mk.api_method.is_some() {
+                let child = RustPermission { 
+                    name: mk.comment.clone().unwrap_or_default(),
+                    alias: mk.func_name.to_uppercase(),
+                    service_id: self.codegen_conf.app_name.clone(), 
+                    module_id: alias.clone(),
+                    api_pattern: mk.api_pattern.clone(), 
+                    api_method: mk.api_method.clone(), 
+                    api_bypass: Some("user".to_string()), 
+                    children: vec![]
+                };
+                children.push(child);
+            }
+        }
+
+        let perm = RustPermission { 
+            name: name,
+            alias: alias.to_uppercase(),
+            service_id: self.codegen_conf.app_name.clone(), 
+            module_id: alias.clone(), 
+            api_pattern: Some(format!("{}/{}", self.codegen_conf.api_handler_prefix.clone(), tb.api_handler_name.clone())), 
+            api_method: None, 
+            api_bypass: None, 
+            children: children
+        };
+        self.permissions.push(perm);
+    }    
 
     pub fn table_for_each<F>(&mut self, func: &mut F)
     where
@@ -187,9 +311,9 @@ impl GenerateContext {
                 Some(tcls) => {
                     tbc.primary_key.split(&",".to_string()).for_each(|f| {
                         for cl in tcls {
-                            if cl.column_name.clone().unwrap_or_default() == f.to_string() {
+                            if cl.column_name.clone().unwrap_or_default() == f.trim().to_string() {
                                 pkeys.push(cl.clone());
-                                break;
+                                // break;
                             }
                         }
                     });
@@ -197,7 +321,7 @@ impl GenerateContext {
                 None => { }
             };
         }
-        
+
         pkeys
     }
 
@@ -243,6 +367,9 @@ pub struct RustFunc {
     pub params: Vec<(String, String)>,
     pub bodylines: Vec<String>,
     pub macros: Vec<String>,
+    pub comment: Option<String>,
+    pub api_method: Option<String>,
+    pub api_pattern: Option<String>,
 }
 
 impl RustFunc {
@@ -359,8 +486,10 @@ pub struct RustStructField {
     pub is_pub: bool,
     pub column_name: String,
     pub field_name: String,
+    pub orignal_field_name: Option<String>,
     pub field_type: String,
     pub is_option: bool,
+    pub annotations: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -409,8 +538,16 @@ impl CodeWriter for RustStruct {
                 format!("{}", fd.field_type.clone())
             };
 
-            if fd.column_name.len() > 0 && fd.column_name != fd.field_name {
-                ro.write_line(&format!("    #[serde(rename(deserialize=\"{}\"))]", fd.column_name.clone()));
+            for annt in fd.annotations.clone() {
+                if !annt.is_empty() {
+                    ro.write_line(&format!("    {}", annt));
+                }
+            }
+            
+            if fd.orignal_field_name.is_none() {
+                if fd.column_name.len() > 0 && fd.column_name != fd.field_name {
+                    ro.write_line(&format!("    #[serde(rename(deserialize=\"{}\"))]", fd.column_name.clone()));
+                }
             }
             
             if fd.is_pub {
@@ -523,11 +660,23 @@ impl RustFileImpl {
     }
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct RustPermission {
+    pub name: String,
+    pub alias: String,
+    pub service_id: String,
+    pub module_id: String,
+    pub api_pattern: Option<String>,
+    pub api_method: Option<String>,
+    pub api_bypass: Option<String>,
+    pub children: Vec<RustPermission>,
+}
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct CodeGenerator {
     pub ctx: GenerateContext,
     pub files: Vec<RustFileImpl>,
+    
     //pub default_entity_using: Vec<String>,
     //pub default_handler_using: Vec<String>,
 }
@@ -547,7 +696,7 @@ impl CodeGenerator {
         }
     }
 
-    pub fn get_default_entity_using(paging: bool) -> Vec<String> {
+    pub fn get_default_entity_using(ctx: &GenerateContext, paging: bool) -> Vec<String> {
         let mut list = vec![];
         list.push("std::fmt::{Debug}".to_string());
         list.push("serde_derive::{Deserialize, Serialize}".to_string());
@@ -561,6 +710,13 @@ impl CodeGenerator {
             list.push("rbson::Bson".to_string());
         }
         list.push("rbatis::crud::{CRUD, Skip}".to_string());
+        if ctx.codegen_conf.allow_bool_widecard {
+            list.push("crate::utils::bool_from_str".to_string());
+        }
+        if ctx.codegen_conf.allow_number_widecard {
+            list.push("crate::utils::{i64_from_str,u64_from_str,f64_from_str,f32_from_str}".to_string());
+        }
+        
         list
     }
 
@@ -618,12 +774,12 @@ impl CodeGenerator {
                 fds.push(st.default_value.clone().unwrap_or_default());
             }
 
-            match execute_sql(qry.base_sql.as_str(), &fds).await {
+            match execute_sql(&self.ctx, qry.base_sql.as_str(), &fds).await {
                 Ok(rt) => {
                     let st = parse_query_as_file(&self.ctx, &qry, &rt);
                     self.files.push(st);
                     if (qry.generate_handler) {
-                        let hl = parse_query_handler_as_file(&self.ctx, &qry, &rt);
+                        let hl = parse_query_handler_as_file(&mut self.ctx, &qry, &rt);
                         self.files.push(hl);
                     }
                 }
@@ -665,7 +821,7 @@ impl CodeGenerator {
                 file_name: format!("{}.rs", snake_case(sts.struct_name.clone().as_str())),
                 mod_name: "entity".to_string(),
                 caretlist: vec![],
-                usinglist: Self::get_default_entity_using(sts.has_paging),
+                usinglist: Self::get_default_entity_using(&self.ctx, sts.has_paging),
                 structlist: stlist,
                 funclist: vec![],
             };
@@ -677,7 +833,7 @@ impl CodeGenerator {
                 file_name: format!("{}.rs", snake_case(sts.struct_name.clone().as_str())),
                 mod_name: "query".to_string(),
                 caretlist: vec![],
-                usinglist: Self::get_default_entity_using(sts.has_paging),
+                usinglist: Self::get_default_entity_using(&self.ctx, sts.has_paging),
                 structlist: vec![sts.clone()],
                 funclist: vec![],
             };
@@ -688,7 +844,7 @@ impl CodeGenerator {
             let mut usinglist = vec![];
             let tbc = self.ctx.get_table_conf(&tbl.table_name.clone().unwrap_or_default()).unwrap();
             if tbc.generate_handler {
-                let funclist = generate_actix_handler_for_table(&self.ctx, &tbl.clone(), &mut usinglist);
+                let funclist = generate_actix_handler_for_table(&mut self.ctx, &tbl.clone(), &mut usinglist);
 
                 usinglist.append(&mut Self::get_default_handler_using(tbc.page_query));
                 // let tbc =  self.ctx.get_table_conf(&tbl.table_name.clone().unwrap_or_default()).unwrap();
@@ -715,7 +871,7 @@ impl CodeGenerator {
             }
                         
             if rel.generate_handler {
-                match parse_relation_handlers_as_file(&self.ctx, &rel) {
+                match parse_relation_handlers_as_file(&mut self.ctx, &rel) {
                     Some(rfi) => {
                         self.files.push(rfi);
                     }
@@ -902,6 +1058,85 @@ impl CodeGenerator {
         Ok(())
     }
 
+    /**
+     * 将Permission写入到数据库
+     */
+    pub async fn write_permission(&self) {
+        let rb = get_rbatis();
+        for ele in self.ctx.permissions.clone() {
+            let mut perm = ChimesPermissionInfo {
+                id: None,
+                alias: Some(ele.alias.clone()),
+                create_time: None,
+                name: Some(ele.name.clone()),
+                pid: Some(0i64),
+                api_pattern: ele.api_pattern,
+                service_id: Some(ele.service_id.clone()),
+                api_method: ele.api_method,
+                api_bypass: ele.api_bypass,
+            };
+            log::info!("Permission: {} {}", ele.name.clone(), ele.alias.clone());
+
+            let mut query = ChimesPermissionInfo::default();
+            query.alias = Some(ele.alias.clone());
+            query.service_id = Some(ele.service_id.clone());
+            let stid = match query.query_list(rb).await {
+                Ok(rs) => {
+                    if rs.len() > 0 {
+                        let mut mp = rs[0].clone();
+                        mp.name = perm.name.clone();
+                        // mp.api_bypass = perm.api_bypass.clone();
+                        mp.api_method = perm.api_method.clone();
+                        mp.api_pattern = perm.api_pattern.clone();
+                        match mp.update(rb).await {
+                            Ok(r) => {
+                                rs[0].id.unwrap_or_default()
+                            }
+                            Err(_) => {
+                                rs[0].id.unwrap_or_default()
+                            }
+                        }                        
+                    } else {
+                        match perm.save(rb).await {
+                            Ok(r) => {
+                                perm.id.unwrap()
+                            }
+                            Err(err) => {
+                                log::info!("Error: {}", err.to_string());
+                                0i64
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    log::info!("Error: {}", err.to_string());
+                    0i64
+                }
+            };
+            if stid != 0i64 {
+                for chl in ele.children.clone() {
+                    let mut chperm = ChimesPermissionInfo {
+                        id: None,
+                        alias: Some(chl.alias.clone()),
+                        create_time: None,
+                        name: Some(chl.name.clone()),
+                        pid: Some(stid),
+                        api_pattern: chl.api_pattern,
+                        service_id: Some(chl.service_id.clone()),
+                        api_method: chl.api_method,
+                        api_bypass: chl.api_bypass,
+                    };
+                    match chperm.save_or_update(rb).await {
+                        Ok(_) => {},
+                        Err(err) => {
+                            log::info!("Error: {}", err.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 }
 
 
@@ -940,28 +1175,84 @@ pub fn parse_data_type_as_rust_type(dt: &String) -> String {
     }
 }
 
-pub fn parse_column_as_field(ctx: &GenerateContext, tbl: &TableConfig, col: &ColumnInfo) -> RustStructField {
+pub fn parse_data_type_annotions(ctx: &GenerateContext, field_type: &String) -> Vec<String> {
+    let mut annts = vec![];
+    if field_type == "bool" {
+        if ctx.codegen_conf.allow_bool_widecard {
+            annts.push("#[serde(default)]".to_string());
+            annts.push("#[serde(deserialize_with=\"bool_from_str\")]".to_string());
+        }
+    }
+    if field_type == "i64" {
+        if ctx.codegen_conf.allow_number_widecard {
+            annts.push("#[serde(default)]".to_string());
+            annts.push("#[serde(deserialize_with=\"i64_from_str\")]".to_string());
+        }
+    }
+    if field_type == "u64" {
+        if ctx.codegen_conf.allow_number_widecard {
+            annts.push("#[serde(default)]".to_string());
+            annts.push("#[serde(deserialize_with=\"u64_from_str\")]".to_string());
+        }
+    }
+    if field_type == "f64" {
+        if ctx.codegen_conf.allow_number_widecard {
+            annts.push("#[serde(default)]".to_string());
+            annts.push("#[serde(deserialize_with=\"f64_from_str\")]".to_string());
+        }
+    }
+    if field_type == "f32" {
+        if ctx.codegen_conf.allow_number_widecard {
+            annts.push("#[serde(default)]".to_string());
+            annts.push("#[serde(deserialize_with=\"f32_from_str\")]".to_string());
+        }
+    }
+    annts
+}
+
+pub fn parse_column_as_field(ctx: &GenerateContext, tbl: &TableConfig, col: &ColumnInfo, rename_id: bool) -> RustStructField {
+    let field_type = parse_data_type_as_rust_type(&col.data_type.clone().unwrap_or_default().to_lowercase());
+
+    let annts = parse_data_type_annotions(ctx, &field_type);
+
+    log::info!("{} is {} -- {}.", col.column_name.clone().unwrap_or_default(), col.extra.clone().unwrap_or_default().to_lowercase(), col.column_key.clone().unwrap_or_default());
+
+    let mut opt_field_name = None;
+    let original_field_name = safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_lowercase());
+    let field_name = if rename_id { 
+        if col.extra.clone().unwrap_or_default().to_lowercase() == "auto_increment" && col.column_key.clone().unwrap_or_default().to_lowercase() == "pri" {
+            opt_field_name = Some(original_field_name.clone());
+            "id".to_string()
+        } else {
+            original_field_name.clone()
+        }
+    } else {
+        original_field_name.clone()
+    };
+
     RustStructField {
         is_pub: true,
         column_name: col.column_name.clone().unwrap_or_default(),
-        field_name: safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_lowercase()),
-        field_type: parse_data_type_as_rust_type(&col.data_type.clone().unwrap_or_default().to_lowercase()),
+        field_name: field_name,
+        field_type: field_type.clone(),
+        orignal_field_name: opt_field_name,
         is_option: if tbl.all_field_option {
             true
         } else {
-             col.is_nullable.clone().unwrap_or_default().to_lowercase() == "yes"
+            col.is_nullable.clone().unwrap_or_default().to_lowercase() == "yes"
         },
+        annotations: annts,
     }
 }
 
-pub fn parse_column_list(ctx: &GenerateContext, tbl: &TableConfig, cols: &Vec<ColumnInfo>, columns: &mut String) -> Vec<RustStructField> {
+pub fn parse_column_list(ctx: &GenerateContext, tbl: &TableConfig, cols: &Vec<ColumnInfo>, columns: &mut String, rename_id: bool) -> Vec<RustStructField> {
     let mut fields = vec![];
 
     for col in cols {
         let colname = col.column_name.clone().unwrap_or_default();
         columns.push_str(colname.as_str());
         columns.push(',');
-        fields.push(parse_column_as_field(ctx, tbl, &col));
+        fields.push(parse_column_as_field(ctx, tbl, &col, rename_id));
     }
     fields
 }

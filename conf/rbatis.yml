@@ -12,6 +12,7 @@ codegen:
   always-generate-handler: true
   always-generate-entity: true
   always-override: true
+  allow-bool-widecard: true
   config-template-generate: D:/gitspaces/longzou/rustspace/rust/rbatisgen/conf/rbatis.yml
   api-handler-prefix: /api/v1
   webserver-port: "10999"
@@ -20,6 +21,7 @@ codegen:
     - name: chimes_user
       struct-name: ChimesUserInfo
       primary-key: user_id
+      comment: 用户
       all-field-option: true
       update-skip-fields: user_id, update_time, create_time
       update-seletive: true
@@ -34,6 +36,7 @@ codegen:
         paged: false
     - name: chimes_menu
       struct-name: ChimesMenuInfo
+      comment: 菜单
       primary-key: menu_id
       tree-parent-field: pid
       tree-root-value: "null"
@@ -46,7 +49,10 @@ codegen:
       api-handler-name: menu
     - name: chimes_permission
       struct-name: ChimesPermissionInfo
+      comment: 权限资源
       primary-key: id
+      tree-parent-field: pid
+      tree-root-value: "0"
       all-field-option: true
       auto-generate-key: id
       update-skip-fields: id, create_time
@@ -55,6 +61,7 @@ codegen:
       logic-deletion: true
       api-handler-name: permission
     - name: chimes_role
+      comment: 角色
       struct-name: ChimesRoleInfo
       primary-key: role_id
       all-field-option: true
@@ -65,6 +72,7 @@ codegen:
       logic-deletion: true
       api-handler-name: role
     - name: chimes_dept
+      comment: 部门
       struct-name: ChimesDeptInfo
       primary-key: dept_id
       tree-parent-field: pid
@@ -76,6 +84,7 @@ codegen:
       logic-deletion: true
       api-handler-name: dept
     - name: chimes_job
+      comment: 岗位
       struct-name: ChimesJobInfo
       primary-key: job_id
       all-field-option: true
@@ -86,6 +95,7 @@ codegen:
       logic-deletion: true
       api-handler-name: job
     - name: chimes_dict
+      comment: 字典
       struct-name: ChimesDictInfo
       primary-key: dict_id
       all-field-option: true
@@ -96,6 +106,7 @@ codegen:
       logic-deletion: true
       api-handler-name: dict
     - name: chimes_dict_detail
+      comment: 字典详情
       struct-name: ChimesDictDetailInfo
       primary-key: detail_id
       all-field-option: true
@@ -106,6 +117,7 @@ codegen:
       logic-deletion: true
       api-handler-name: dict_detail
     - name: chimes_log
+      comment: 日志
       struct-name: ChimesLogInfo
       primary-key: log_id
       all-field-option: true
@@ -116,6 +128,7 @@ codegen:
       logic-deletion: true
       api-handler-name: logs
     - name: chimes_roles_depts
+      comment: 角色部门
       struct-name: ChimesRoleDeptInfo
       primary-key: role_id, dept_id
       all-field-option: true
@@ -124,6 +137,7 @@ codegen:
       logic-deletion: false
       generate-handler: false
     - name: chimes_users_roles
+      comment: 用户角色
       struct-name: ChimesUserRoleInfo
       primary-key: role_id, user_id
       all-field-option: true
@@ -132,14 +146,16 @@ codegen:
       logic-deletion: false
       generate-handler: false
     - name: chimes_roles_permissions
+      comment: 角色资源
       struct-name: ChimesRolePermissionInfo
-      primary-key: role_id, permission_id
+      primary-key: role_id, id
       all-field-option: true
       update-seletive: false
       page-query: false
       logic-deletion: false
       generate-handler: false
     - name: chimes_roles_menus
+      comment: 角色菜单
       struct-name: ChimesRoleMenuInfo
       primary-key: role_id, menu_id
       all-field-option: true
@@ -148,6 +164,7 @@ codegen:
       logic-deletion: false
       generate-handler: false
     - name: chimes_users_jobs
+      comment: 用户岗位
       struct-name: ChimesUserJobInfo
       primary-key: user_id, job_id
       all-field-option: true
@@ -156,6 +173,7 @@ codegen:
       logic-deletion: false
       generate-handler: false
     - name: chimes_profile
+      comment: 用户档案
       struct-name: ChimeProfileInfo
       primary-key: user_id
       all-field-option: true
@@ -166,6 +184,7 @@ codegen:
       api-handler-name: profile
   relations:
     - struct-name: ChimesUserRoles
+      comment: 用户角色关系
       major-table: chimes_user
       extend-major: true
       generate-handler: true
@@ -181,24 +200,66 @@ codegen:
           join-field: role_id
           major-field: user_id
           middle-table: chimes_users_roles
+    - struct-name: ChimesRoleMenus
+      comment: 角色菜单功能关系
+      major-table: chimes_role
+      extend-major: true
+      generate-handler: true
+      generate-select: true
+      generate-save: true
+      generate-delete: true
+      one-to-many:
+        - table-name: chimes_menu
+          join-field: menu_id
+          major-field: role_id
+          middle-table: chimes_roles_menus
+        - table-name: chimes_permission
+          join-field: id
+          major-field: role_id
+          middle-table: chimes_roles_permissions          
+    - struct-name: ChimesUserDetailInfo
+      comment: 用户详情信息
+      major-table: chimes_user
+      extend-major: true
+      generate-handler: true
+      generate-select: true
+      generate-save: true
+      generate-delete: true
+      one-to-one:
+        - table-name: chimes_dept
+          join-field: dept_id
+          major-field: dept_id
+          readonly: true
+      one-to-many:
+        - table-name: chimes_role
+          join-field: role_id
+          major-field: user_id
+          middle-table: chimes_users_roles
+        - table-name: chimes_job
+          join-field: job_id
+          major-field: user_id
+          middle-table: chimes_users_jobs
   queries:
-    - base-sql: SELECT p.*, cu.username FROM chimes_permission p LEFT JOIN chimes_roles_permissions rp ON p.id = rp.permission_id  LEFT JOIN chimes_users_roles cur ON rp.role_id = cur.role_id  LEFT JOIN chimes_user cu ON cur.user_id  = cu.user_id  WHERE p.api_method = ? AND p.api_pattern  = ? AND cu.username  = ? 
+    - base-sql: SELECT p.*, cu.username FROM chimes_permission p LEFT JOIN chimes_roles_permissions rp ON p.id = rp.permission_id  LEFT JOIN chimes_users_roles cur ON rp.role_id = cur.role_id  LEFT JOIN chimes_user cu ON cur.user_id  = cu.user_id  AND cu.username  = ?  WHERE p.api_method = ? AND p.api_pattern  = ? 
       struct-name: QueryUserPermission
+      comment: 用户权限查询
       generate-handler: true
       single-result: false
-      api-handler-name: user
+      api-handler-name: users
       params:
+        - column-names: username
+          column-types: varchar
+          default-value: admin
         - column-names: api_method
           column-types: varchar
           default-value: POST
         - column-names: api_pattern
           column-types: varchar
           default-value: /api/v1/user/save
-        - column-names: username
-          column-types: varchar
-          default-value: admin
-    - base-sql: SELECT p.* FROM chimes_menu p INNER JOIN chimes_roles_menus rp ON p.menu_id = rp.menu_id INNER JOIN chimes_users_roles cur ON rp.role_id = cur.role_id  INNER JOIN chimes_user cu ON cur.user_id  = cu.user_id AND cu.username = ?
+
+    - base-sql: SELECT p.* FROM chimes_menu p INNER JOIN chimes_roles_menus rp ON p.menu_id = rp.menu_id INNER JOIN chimes_users_roles cur ON rp.role_id = cur.role_id AND cu.username = ?  INNER JOIN chimes_user cu ON cur.user_id  = cu.user_id 
       struct-name: QueryUserMenus
+      comment: 用户菜单查询
       generate-handler: false
       single-result: false
       api-handler-name: menu
@@ -206,7 +267,16 @@ codegen:
         - column-names: username
           column-types: varchar
           default-value: admin
-
+    - base-sql: select cd.name dict_name, cdd.* from chimes_dict_detail cdd inner join chimes_dict cd on cdd.dict_id  = cd.dict_id where cd.name  in (?)
+      struct-name: QueryDictDetail
+      comment: 字典详情查询
+      generate-handler: true
+      single-result: false
+      api-handler-name: dictdetail
+      params:
+        - column-names: dict_name
+          column-types: varchar
+          default-value: dept_status
 just-test:
   bool-variant:
   - true

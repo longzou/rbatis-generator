@@ -1,8 +1,9 @@
 use change_case::{pascal_case, snake_case};
 use chrono::format::format;
 use substring::Substring;
-use crate::codegen::{GenerateContext, RustFunc, parse_data_type_as_rust_type};
+use crate::codegen::{GenerateContext, RustFunc, parse_data_type_as_rust_type, parse_data_type_annotions};
 use crate::config::{AppConfig, QueryConfig, safe_struct_field_name};
+use crate::schema::TableInfo;
 
 use sqlx::Row;
 use sqlx::Column;
@@ -15,7 +16,7 @@ pub struct TransformRow {
   pub columns: String,
 }
 
-pub async fn execute_sql(sql: &str, fds: &Vec<String>) -> Result<TransformRow, sqlx::Error> {
+pub async fn execute_sql(ctx: &GenerateContext, sql: &str, fds: &Vec<String>) -> Result<TransformRow, sqlx::Error> {
   let conf = AppConfig::get().lock().unwrap().to_owned();
   let pool = sqlx::MySqlPool::connect(conf.mysql_conf.url.as_str()).await?;
 
@@ -38,12 +39,16 @@ pub async fn execute_sql(sql: &str, fds: &Vec<String>) -> Result<TransformRow, s
             column_text.push_str(col.name().to_string().as_str());
             column_text.push_str(",");
             log::info!("Column: {} type is {}.", col.name().clone().to_string(), col.type_info().clone().name().to_string().to_lowercase());
+            let field_type = parse_data_type_as_rust_type(&col.type_info().name().to_string().to_lowercase());
+            let annts = parse_data_type_annotions(ctx, &field_type);
             let rsf = RustStructField {
                 is_pub: true,
                 column_name: col.name().to_string(), 
                 field_name: safe_struct_field_name(&col.name().to_string().to_lowercase()),
-                field_type: parse_data_type_as_rust_type(&col.type_info().name().to_string().to_lowercase()),
+                field_type: field_type,
                 is_option: true,
+                orignal_field_name: None,
+                annotations: annts,
             };
             tfrow.fields.push(rsf);
             tfrow.columns = column_text.substring(0, column_text.len() - 1).to_string();
@@ -65,7 +70,7 @@ pub async fn execute_sql(sql: &str, fds: &Vec<String>) -> Result<TransformRow, s
 pub fn parse_query_as_file(ctx: &GenerateContext, tbl: &QueryConfig, cols: &TransformRow) -> RustFileImpl {
   let st = parse_query_as_struct(ctx, tbl, cols);
   let st_params = parse_query_params_as_struct(ctx, tbl);
-  let mut usinglist = CodeGenerator::get_default_entity_using(!tbl.single_result);
+  let mut usinglist = CodeGenerator::get_default_entity_using(ctx, !tbl.single_result);
 
   RustFileImpl { 
     file_name: snake_case(tbl.struct_name.clone().as_str()) + ".rs",
@@ -123,12 +128,16 @@ pub fn parse_query_params_as_struct(ctx: &GenerateContext, tbl: &QueryConfig) ->
   let funclist = vec![];
   
   for fd in tbl.params.clone() {
+    let field_type = parse_data_type_as_rust_type(&fd.column_types.unwrap());
+    let annts = parse_data_type_annotions(ctx, &field_type);
     let st = RustStructField {
         is_pub: true,
         column_name: String::new(),
         field_name: safe_struct_field_name(&fd.column_names.unwrap()),
-        field_type: parse_data_type_as_rust_type(&fd.column_types.unwrap()),
+        field_type: field_type,
         is_option: false,
+        orignal_field_name: None,
+        annotations: annts,
     };
     fields.push(st);
   }
@@ -145,12 +154,16 @@ pub fn parse_query_params_as_struct(ctx: &GenerateContext, tbl: &QueryConfig) ->
               while ii < cts.len() {
                 let fdname = cns[ii].clone();
                 let fdtype = cts[ii].clone();
+                let field_type = parse_data_type_as_rust_type(&fdtype);
+
                 let st = RustStructField {
                   is_pub: true,
                   column_name: String::new(),
                   field_name: safe_struct_field_name(&fdname),
-                  field_type: parse_data_type_as_rust_type(&fdtype),
+                  field_type: field_type.clone(),
                   is_option: true,
+                  orignal_field_name: None,
+                  annotations: parse_data_type_annotions(ctx, &field_type),
                 };
                 fields.push(st);
                 ii += 1;
@@ -267,6 +280,17 @@ pub fn parse_query_as_func(ctx: &GenerateContext, tbl: &QueryConfig, paging: boo
     }
   };
 
+  let comment = if paging {
+    format!("{}分页", tbl.comment.clone())
+  } else {
+    if onerow {
+      format!("{}获取", tbl.comment.clone())
+    } else {
+      format!("{}列表", tbl.comment.clone())
+    }
+  };
+
+
   RustFunc {
     is_struct_fn: true,
     is_self_fn: false,
@@ -284,6 +308,9 @@ pub fn parse_query_as_func(ctx: &GenerateContext, tbl: &QueryConfig, paging: boo
     params: params,
     bodylines: body,
     macros: vec!["#[allow(dead_code)]".to_string()],
+    comment: Some(comment.clone()),
+    api_method: None,
+    api_pattern: None,
   }
 }
 
@@ -358,11 +385,20 @@ pub fn generate_handler_query_for_query(ctx: &GenerateContext, tbl: &QueryConfig
     format!("{}_query", snake_case(tbl.struct_name.clone().as_str()))
   };
 
-  let postmacro = if paging {
-    format!("#[post(\"{}/{}/paged/{{current}}/{{size}}\")]", ctx.codegen_conf.api_handler_prefix.clone(), tbl.api_handler_name.clone())
+  let url_pattern = if paging {
+    format!("{}/{}/paged/{{current}}/{{size}}", ctx.codegen_conf.api_handler_prefix.clone(), tbl.api_handler_name.clone())
   } else {
-    format!("#[post(\"{}/{}/query\")]", ctx.codegen_conf.api_handler_prefix.clone(), tbl.api_handler_name.clone())
+    format!("{}/{}/query", ctx.codegen_conf.api_handler_prefix.clone(), tbl.api_handler_name.clone())
   };
+
+  let comment = if paging {
+    format!("{}列表", tbl.comment.clone())
+  } else {
+    format!("{}分页", tbl.comment.clone())
+  };
+
+  let postmacro = format!("#[post(\"{}\")]", url_pattern.clone());
+  
 
   RustFunc { 
       is_struct_fn: false, 
@@ -376,14 +412,17 @@ pub fn generate_handler_query_for_query(ctx: &GenerateContext, tbl: &QueryConfig
       return_type: Some("Result<HttpResponse>".to_string()), 
       params: params, 
       bodylines: body,
-      macros: vec![postmacro]
+      macros: vec![postmacro],
+      api_method: Some("POST".to_string()),
+      api_pattern: Some(url_pattern.clone()),
+      comment: Some(comment.clone()),
   }
 }
 
 
 
 
-pub fn parse_query_handler_as_file(ctx: &GenerateContext, tbl: &QueryConfig, cols: &TransformRow) -> RustFileImpl {
+pub fn parse_query_handler_as_file(ctx: &mut GenerateContext, tbl: &QueryConfig, cols: &TransformRow) -> RustFileImpl {
   let tbl_name = tbl.struct_name.clone();
   let tbl_param_name = format!("{}Params", tbl_name);
 
@@ -397,6 +436,13 @@ pub fn parse_query_handler_as_file(ctx: &GenerateContext, tbl: &QueryConfig, col
   let queryfunc = generate_handler_query_for_query(ctx, tbl, false, false);
   let pagefunc = generate_handler_query_for_query(ctx, tbl, true, false);
   let onerowfunc = generate_handler_query_for_query(ctx, tbl, false, true);
+  let funclist = if tbl.single_result {
+                  vec![onerowfunc]
+                } else {
+                  vec![pagefunc, queryfunc]
+                };
+  
+  ctx.add_permission_for_query(&tbl, &funclist);
 
   RustFileImpl { 
     file_name: snake_case(tbl.struct_name.clone().as_str()) + ".rs",
@@ -404,10 +450,6 @@ pub fn parse_query_handler_as_file(ctx: &GenerateContext, tbl: &QueryConfig, col
     caretlist: vec![],
     usinglist: usinglist, 
     structlist: vec![],
-    funclist: if tbl.single_result {
-      vec![onerowfunc]
-     } else {
-      vec![pagefunc, queryfunc]
-     }
+    funclist: funclist
   }
 }

@@ -306,4 +306,116 @@ impl UserClaims {
     }
 }
 
+
+
+#[derive(Deserialize)]
+#[serde(untagged)] // 枚举类型的无标签方式
+enum StrOrU64 {
+    String(String),
+    U64(u64),
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)] // 枚举类型的无标签方式
+enum StrOrI64 {
+    String(String),
+    I64(i64),
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)] // 枚举类型的无标签方式
+enum StrOrF64 {
+    String(String),
+    F64(f64),
+}
+
+
+#[derive(Deserialize)]
+#[serde(untagged)] // 枚举类型的无标签方式
+enum StrOrF32 {
+    String(String),
+    F32(f32),
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)] // 枚举类型的无标签方式
+enum StrOrBool {
+    String(String),
+    I64(i64),
+    Bool(bool),
+}
+
+
+pub fn u64_from_str<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match StrOrU64::deserialize(deserializer)? {
+        StrOrU64::String(v) => v.parse().unwrap_or_default(),
+        StrOrU64::U64(v) => v,
+    })
+}
+
+
+pub fn i64_from_str<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match StrOrI64::deserialize(deserializer)? {
+        StrOrI64::String(v) => v.parse().unwrap_or_default(),
+        StrOrI64::I64(v) => v,
+    })
+}
+
+
+pub fn f64_from_str<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match StrOrF64::deserialize(deserializer)? {
+        StrOrF64::String(v) => v.parse().unwrap_or_default(),
+        StrOrF64::F64(v) => v,
+    })
+}
+
+pub fn f32_from_str<'de, D>(deserializer: D) -> Result<f32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match StrOrF32::deserialize(deserializer)? {
+        StrOrF32::String(v) => v.parse().unwrap_or_default(),
+        StrOrF32::F32(v) => v,
+    })
+}
+
+
+pub fn bool_from_str<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match StrOrBool::deserialize(deserializer) {
+        Ok(t) => {
+            match t {
+                StrOrBool::String(v) => {
+                    match v.parse::<bool>() {
+                        Ok(tf) => Some(tf),
+                        Err(err) => {
+                            log::info!("Parse erroor {}", err);
+                            None
+                        }
+                    }
+                },
+                StrOrBool::I64(v) => Some(v != 0i64),
+                StrOrBool::Bool(v) => Some(v),
+            }
+        }
+        Err(err) => {
+            log::info!("Deserializer erroor {}", err);
+            None
+        }
+    })
+}
+
+
+
 "#;

@@ -11,6 +11,7 @@ mod utils;
 mod config;
 mod codegen;
 mod tmpl;
+mod permission;
 
 use crate::codegen::{GenerateContext, CodeGenerator};
 use crate::config::AppConfig;
@@ -47,6 +48,8 @@ async fn main() -> std::io::Result<()> {
     cg.load_tables().await;
     cg.generate();
     cg.write_out()?;
+
+    cg.write_permission().await;
 
     std::thread::sleep_ms(500u32);
     Ok(())

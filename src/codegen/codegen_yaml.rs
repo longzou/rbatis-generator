@@ -176,6 +176,8 @@ fn parse_yaml_node_as_struct(doc: &Yaml, st: &mut RustStruct, stlist: &mut Vec<R
             field_name: snake_case(key.clone()).to_string(),
             field_type: value_type,
             is_option: option_fd,
+            orignal_field_name: None,
+            annotations: vec![],
         });
       }
       // stlist.push(st.clone());
@@ -315,7 +317,10 @@ fn generate_load_from_node_for_struct(st: &mut RustStruct) {
     return_type: Some(st.struct_name.clone()),
     params: params,
     bodylines: body, 
-    macros: vec![] 
+    macros: vec![],
+    comment: None,
+    api_method: None,
+    api_pattern: None,
   };
   st.funclist.push(func);
 }
@@ -376,7 +381,10 @@ fn generate_load_from_yaml_for_struct(st: &mut RustStruct) {
     return_type: Some(st.struct_name.clone()),
     params: params,
     bodylines: body, 
-    macros: vec![] 
+    macros: vec![],
+    comment: None,
+    api_method: None,
+    api_pattern: None,
   };
   st.funclist.push(func);
 }
@@ -409,7 +417,10 @@ fn generate_single_get_for_struct(st: &mut RustStruct) {
     return_type: Some(format!("&'static Mutex<{}>", st.struct_name.clone())),
     params: params,
     bodylines: body, 
-    macros: vec![] 
+    macros: vec![],
+    comment: None,
+    api_method: None,
+    api_pattern: None,
   };
   st.funclist.push(func);
 }

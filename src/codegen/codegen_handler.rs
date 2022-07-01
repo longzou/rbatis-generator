@@ -6,7 +6,7 @@ use crate::config::{TableConfig, get_rbatis};
 use crate::schema::{TableInfo};
 
 
-pub fn generate_actix_handler_for_table(ctx: &GenerateContext, tbl: &TableInfo, usinglist: &mut Vec<String>) -> Vec<RustFunc> {
+pub fn generate_actix_handler_for_table(ctx: &mut GenerateContext, tbl: &TableInfo, usinglist: &mut Vec<String>) -> Vec<RustFunc> {
   let mut funclist = vec![];
   let tbl_name = tbl.table_name.clone().unwrap_or_default();
   let tbl_struct_name = match ctx.get_struct_name(&tbl_name.clone()) {
@@ -18,12 +18,24 @@ pub fn generate_actix_handler_for_table(ctx: &GenerateContext, tbl: &TableInfo, 
 
   let tbc = ctx.get_table_conf(&tbl_name.clone()).unwrap();
 
+  let mut pkcols = ctx.get_table_column_by_primary_key(&tbl_name.clone());
+  if pkcols.is_empty() {
+      pkcols.append(&mut ctx.get_table_pkey_column(&tbl_name.clone()));
+  }
+
   let save_handler = generate_handler_save_for_struct(ctx, tbl);
   funclist.push(save_handler);
+
   let update_handler = generate_handler_update_for_struct(ctx, tbl);
   funclist.push(update_handler);
   let delete_handler = generate_handler_delete_for_struct(ctx, tbl);
   funclist.push(delete_handler);
+
+  if  pkcols.len() == 1 {
+    let delete_ids_handler = generate_handler_delete_ids_for_struct(ctx, tbl);
+    funclist.push(delete_ids_handler);
+  }
+
   let list_handler = generate_handler_query_list_for_struct(ctx, tbl);
   funclist.push(list_handler);
   if tbc.page_query {
@@ -41,7 +53,9 @@ pub fn generate_actix_handler_for_table(ctx: &GenerateContext, tbl: &TableInfo, 
     usinglist.push(format!("crate::entity::{{{}, {}Value}}", tbl_struct_name.clone(), tbl_struct_name.clone()).to_string());
   } else {
     usinglist.push(format!("crate::entity::{}", tbl_struct_name.clone()).to_string());
-  }  
+  }
+
+  ctx.add_permission(tbl, &funclist);
 
   funclist
 }
@@ -85,7 +99,9 @@ pub fn generate_handler_update_for_struct(ctx: &GenerateContext, tbl: &TableInfo
   body.push("}".to_string());
   body.push("}".to_string());
   let func_name = tbc.api_handler_name.clone() + "_update";
-  let postmacro = format!("#[post(\"{}/{}/update\")]", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+
+  let url_pattern = format!("{}/{}/update", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+  let postmacro = format!("#[post(\"{}\")]", url_pattern.clone());
   RustFunc { 
       is_struct_fn: false, 
       is_self_fn: false,
@@ -98,7 +114,10 @@ pub fn generate_handler_update_for_struct(ctx: &GenerateContext, tbl: &TableInfo
       return_type: Some("Result<HttpResponse>".to_string()), 
       params: params, 
       bodylines: body,
-      macros: vec![postmacro]
+      macros: vec![postmacro],
+      comment: Some(format!("{}更新", tbc.comment.clone())),
+      api_method: Some("POST".to_string()),
+      api_pattern: Some(url_pattern.clone()),
   }
 }
 
@@ -141,7 +160,8 @@ pub fn generate_handler_save_for_struct(ctx: &GenerateContext, tbl: &TableInfo) 
   body.push("}".to_string());
   let func_name = tbc.api_handler_name.clone() + "_save";
 
-  let postmacro = format!("#[post(\"{}/{}/save\")]", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+  let url_pattern = format!("{}/{}/save", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+  let postmacro = format!("#[post(\"{}\")]", url_pattern.clone());
   RustFunc { 
       is_struct_fn: false, 
       is_self_fn: false,
@@ -154,7 +174,10 @@ pub fn generate_handler_save_for_struct(ctx: &GenerateContext, tbl: &TableInfo) 
       return_type: Some("Result<HttpResponse>".to_string()), 
       params: params, 
       bodylines: body,
-      macros: vec![postmacro]
+      macros: vec![postmacro],
+      comment: Some(format!("{}保存", tbc.comment.clone())),
+      api_method: Some("POST".to_string()),
+      api_pattern: Some(url_pattern.clone()),
   }
 }
 
@@ -198,7 +221,9 @@ pub fn generate_handler_delete_for_struct(ctx: &GenerateContext, tbl: &TableInfo
   body.push("}".to_string());
   let func_name = tbc.api_handler_name.clone() + "_delete";
 
-  let postmacro = format!("#[post(\"{}/{}/delete\")]", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+  let url_pattern = format!("{}/{}/delete", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+  let postmacro = format!("#[post(\"{}\")]", url_pattern.clone());
+
   RustFunc { 
       is_struct_fn: false, 
       is_self_fn: false,
@@ -211,7 +236,81 @@ pub fn generate_handler_delete_for_struct(ctx: &GenerateContext, tbl: &TableInfo
       return_type: Some("Result<HttpResponse>".to_string()), 
       params: params, 
       bodylines: body,
-      macros: vec![postmacro]
+      macros: vec![postmacro],
+      comment: Some(format!("{}删除", tbc.comment.clone())),
+      api_method: Some("POST".to_string()),
+      api_pattern: Some(url_pattern.clone()),
+  }
+}
+
+
+/**
+ * 生成handler：delete操作
+ * 
+ * 
+ */
+pub fn generate_handler_delete_ids_for_struct(ctx: &GenerateContext, tbl: &TableInfo) -> RustFunc {
+  let tbl_name = tbl.table_name.clone().unwrap_or_default();
+  let tbc = ctx.get_table_conf(&tbl_name.clone()).unwrap();
+
+  let tbl_struct_name = match ctx.get_struct_name(&tbl_name.clone()) {
+    Some(t) => t,
+    None => {
+        pascal_case(tbl_name.clone().as_str())
+    }
+  };
+
+  let mut pkcols = ctx.get_table_column_by_primary_key(&tbl_name.clone());
+  if pkcols.is_empty() {
+      pkcols.append(&mut ctx.get_table_pkey_column(&tbl_name.clone()));
+  }  
+
+  
+
+
+  let mut params = Vec::new();
+  // let pk = ctx.get_table_column_by_name(tbl.table_name, tbl);
+  // params.push(("req".to_string(), format!("web::Json<{}>", tbl_struct_name.clone())));
+  for col in pkcols.clone() {
+    params.push(("req".to_string(), format!("web::Json<Vec<{}>>", parse_data_type_as_rust_type(&col.data_type.clone().unwrap_or_default().to_lowercase()))));
+  }
+ 
+  let mut body = vec![];
+  
+  body.push(format!("let rb = get_rbatis();"));
+  body.push(format!("let ids = req.as_slice();"));
+  
+  body.push(format!("match {}::remove_ids(rb, ids).await {{", tbl_struct_name.clone()));
+  
+  body.push(format!("Ok(st) => {{"));
+  body.push(format!("let ret: web::Json<ApiResult<u64>> = web::Json(ApiResult::ok(st));"));
+  body.push(format!("Ok(HttpResponse::Ok().json(ret))"));
+  body.push("}".to_string());
+  body.push("Err(err) => {".to_string());
+  body.push(format!("let ret: web::Json<ApiResult<u64>> = web::Json(ApiResult::error(5010, &err.to_string()));"));
+  body.push(format!("Ok(HttpResponse::Ok().json(ret))"));
+  body.push("}".to_string());
+  body.push("}".to_string());
+  let func_name = tbc.api_handler_name.clone() + "_delete_ids";
+
+  let url_pattern = format!("{}/{}/delete_ids", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+  let postmacro = format!("#[post(\"{}\")]", url_pattern.clone());
+  RustFunc { 
+      is_struct_fn: false, 
+      is_self_fn: false,
+      is_self_mut: false,
+      is_pub: true, 
+      is_async: true, 
+      func_name: func_name, 
+      return_is_option: false,
+      return_is_result: false, 
+      return_type: Some("Result<HttpResponse>".to_string()), 
+      params: params, 
+      bodylines: body,
+      macros: vec![postmacro],
+      comment: Some(format!("{}批量删除", tbc.comment.clone())),
+      api_method: Some("POST".to_string()),
+      api_pattern: Some(url_pattern.clone()),      
   }
 }
 
@@ -264,7 +363,8 @@ pub fn generate_handler_query_list_for_struct(ctx: &GenerateContext, tbl: &Table
   body.push("}".to_string());
   let func_name = tbc.api_handler_name.clone() + "_search";
 
-  let postmacro = format!("#[post(\"{}/{}/search\")]", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+  let url_pattern = format!("{}/{}/search", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+  let postmacro = format!("#[post(\"{}\")]", url_pattern.clone());
   RustFunc { 
       is_struct_fn: false, 
       is_self_fn: false,
@@ -277,7 +377,10 @@ pub fn generate_handler_query_list_for_struct(ctx: &GenerateContext, tbl: &Table
       return_type: Some("Result<HttpResponse>".to_string()), 
       params: params, 
       bodylines: body,
-      macros: vec![postmacro]
+      macros: vec![postmacro],
+      comment: Some(format!("{}查询", tbc.comment.clone())),
+      api_method: Some("POST".to_string()),
+      api_pattern: Some(url_pattern.clone()),
   }
 }
 
@@ -334,7 +437,9 @@ pub fn generate_handler_query_page_for_struct(ctx: &GenerateContext, tbl: &Table
   body.push("}".to_string());
   let func_name = tbc.api_handler_name.clone() + "_paged";
 
-  let postmacro = format!("#[post(\"{}/{}/paged/{{current}}/{{size}}\")]", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+  let url_pattern = format!("{}/{}/paged/{{current}}/{{size}}", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+  let postmacro = format!("#[post(\"{}\")]", url_pattern.clone());
+
   RustFunc { 
       is_struct_fn: false, 
       is_self_fn: false,
@@ -347,7 +452,10 @@ pub fn generate_handler_query_page_for_struct(ctx: &GenerateContext, tbl: &Table
       return_type: Some("Result<HttpResponse>".to_string()), 
       params: params, 
       bodylines: body,
-      macros: vec![postmacro]
+      macros: vec![postmacro],
+      comment: Some(format!("{}分页查询", tbc.comment.clone())),
+      api_method: Some("POST".to_string()),
+      api_pattern: Some(url_pattern.clone()),
   }
 }
 
@@ -411,7 +519,9 @@ pub fn generate_handler_query_tree_for_struct(ctx: &GenerateContext, tbl: &Table
   body.push("}".to_string());
   let func_name = tbc.api_handler_name.clone() + "_tree";
 
-  let postmacro = format!("#[get(\"{}/{}/tree\")]", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+  let url_pattern = format!("{}/{}/tree", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+  let postmacro = format!("#[get(\"{}\")]", url_pattern.clone());
+
   RustFunc { 
       is_struct_fn: false, 
       is_self_fn: false,
@@ -424,7 +534,10 @@ pub fn generate_handler_query_tree_for_struct(ctx: &GenerateContext, tbl: &Table
       return_type: Some("Result<HttpResponse>".to_string()), 
       params: params, 
       bodylines: body,
-      macros: vec![postmacro]
+      macros: vec![postmacro],
+      comment: Some(format!("{}树形查询", tbc.comment.clone())),
+      api_method: Some("GET".to_string()),
+      api_pattern: Some(url_pattern.clone()),
   }
 }
 
@@ -491,7 +604,9 @@ pub fn generate_handler_get_for_struct(ctx: &GenerateContext, tbl: &TableInfo) -
   body.push("}".to_string());
   let func_name = tbc.api_handler_name.clone() + "_get";
 
-  let postmacro = format!("#[get(\"{}/{}/get/{{id}}\")]", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+  let url_pattern = format!("{}/{}/get/{{id}}", ctx.codegen_conf.api_handler_prefix.clone(), tbc.api_handler_name.clone());
+
+  let postmacro = format!("#[get(\"{}\")]", url_pattern.clone());
   RustFunc { 
       is_struct_fn: false, 
       is_self_fn: false,
@@ -504,6 +619,9 @@ pub fn generate_handler_get_for_struct(ctx: &GenerateContext, tbl: &TableInfo) -
       return_type: Some("Result<HttpResponse>".to_string()), 
       params: params, 
       bodylines: body,
-      macros: vec![postmacro]
+      macros: vec![postmacro],
+      comment: Some(format!("{}获取", tbc.comment.clone())),
+      api_method: Some("GET".to_string()),
+      api_pattern: Some(url_pattern.clone()),      
   }
 }
