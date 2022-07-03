@@ -189,6 +189,8 @@ pub struct TableConfig {
     pub all_field_option: bool,
     pub update_skip_fields: Option<String>,
     pub update_seletive: bool,
+    pub default_sort_field: Option<String>,
+    pub generate_param_struct: bool,
     pub page_query: bool,
     pub logic_deletion: bool,
     pub generate_handler: bool,
@@ -645,6 +647,22 @@ impl CodeGenConfig {
                             }
                             None => {
                                 true
+                            }
+                        },
+                        generate_param_struct: match tbn["generate-param-struct"].as_bool() {
+                            Some(ff) => {
+                                ff
+                            }
+                            None => {
+                                false
+                            }
+                        },
+                        default_sort_field: match tbn["default-sort-field"].as_str() {
+                            Some(tstr) => {
+                                Some(tstr.to_string())
+                            }
+                            None => {
+                                None
                             }
                         },
                         update_seletive: tbn["update-seletive"].as_bool().unwrap_or_default(),

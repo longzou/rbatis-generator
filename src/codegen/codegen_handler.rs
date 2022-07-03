@@ -50,10 +50,19 @@ pub fn generate_actix_handler_for_table(ctx: &mut GenerateContext, tbl: &TableIn
     let tree_handler = generate_handler_query_tree_for_struct(ctx, tbl);
     funclist.push(tree_handler);
     usinglist.push(format!("actix_web::HttpRequest"));
-    usinglist.push(format!("crate::entity::{{{}, {}Value}}", tbl_struct_name.clone(), tbl_struct_name.clone()).to_string());
+    if tbc.generate_param_struct {
+      usinglist.push(format!("crate::entity::{{{}, {}Value, {}Query}}", tbl_struct_name.clone(), tbl_struct_name.clone(), tbl_struct_name.clone()).to_string());
+    } else {
+      usinglist.push(format!("crate::entity::{{{}, {}Value}}", tbl_struct_name.clone(), tbl_struct_name.clone()).to_string());
+    }
   } else {
-    usinglist.push(format!("crate::entity::{}", tbl_struct_name.clone()).to_string());
+    if tbc.generate_param_struct {
+      usinglist.push(format!("crate::entity::{{{}, {}Query}}", tbl_struct_name.clone(), tbl_struct_name.clone()).to_string());
+    } else {
+      usinglist.push(format!("crate::entity::{}", tbl_struct_name.clone()).to_string());
+    }
   }
+  
 
   ctx.add_permission(tbl, &funclist);
 
@@ -333,8 +342,12 @@ pub fn generate_handler_query_list_for_struct(ctx: &GenerateContext, tbl: &Table
 
   let mut params = Vec::new();
   // let pk = ctx.get_table_column_by_name(tbl.table_name, tbl);
-  params.push(("req".to_string(), format!("web::Json<{}>", tbl_struct_name.clone())));
- 
+  if tbc.generate_param_struct {
+    params.push(("req".to_string(), format!("web::Json<{}Query>", tbl_struct_name.clone())));
+  } else {
+    params.push(("req".to_string(), format!("web::Json<{}>", tbl_struct_name.clone())));
+  }
+
   let mut body = vec![];
   
   body.push(format!("let rb = get_rbatis();"));
@@ -404,7 +417,12 @@ pub fn generate_handler_query_page_for_struct(ctx: &GenerateContext, tbl: &Table
 
   let mut params = Vec::new();
   // let pk = ctx.get_table_column_by_name(tbl.table_name, tbl);
-  params.push(("req".to_string(), format!("web::Json<{}>", tbl_struct_name.clone())));
+  if tbc.generate_param_struct {
+    params.push(("req".to_string(), format!("web::Json<{}Query>", tbl_struct_name.clone())));
+  } else {
+    params.push(("req".to_string(), format!("web::Json<{}>", tbl_struct_name.clone())));
+  }
+  
   params.push(("path_param".to_string(), format!("web::Path<(u64, u64)>")));
 
   let mut body = vec![];

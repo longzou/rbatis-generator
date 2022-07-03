@@ -91,6 +91,8 @@ codegen:
       auto-generate-key: job_id
       update-skip-fields: job_id, create_time, update_time
       update-seletive: true
+      default-sort-field: job_sort asc
+      generate-param-struct: true
       page-query: true
       logic-deletion: true
       api-handler-name: job

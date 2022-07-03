@@ -15,7 +15,7 @@ use crate::config::{CodeGenConfig, TableConfig, get_rbatis, safe_struct_field_na
 use crate::schema::{TableInfo, ColumnInfo};
 use substring::Substring;
 
-use super::{generate_actix_handler_for_table, execute_sql, parse_query_as_struct, parse_query_as_file, parse_query_handler_as_file, parse_relation_handlers_as_file, parse_relation_as_file, parse_table_as_value_object_struct, parse_yaml_as_file};
+use super::{generate_actix_handler_for_table, execute_sql, parse_query_as_struct, parse_query_as_file, parse_query_handler_as_file, parse_relation_handlers_as_file, parse_relation_as_file, parse_table_as_value_object_struct, parse_yaml_as_file, parse_table_as_request_param_struct};
 
 pub trait CodeWriter {
     fn write(&self, ro: &mut RustOutput);
@@ -796,26 +796,38 @@ impl CodeGenerator {
      */
     pub fn generate(&mut self) {
         let mut hashm = HashMap::new();
+        let mut paramhm = HashMap::new();
         for tbl in self.ctx.tables.clone() {
             let columns = self.ctx.get_table_columns(&tbl.table_name.clone().unwrap_or_default());
             let st = parse_table_as_struct(&self.ctx, &tbl, &columns);
             self.ctx.add_struct(&st);
+            
 
             let tbcc = self.ctx.get_table_conf(&tbl.table_name.clone().unwrap_or_default()).unwrap();
             if tbcc.tree_parent_field.is_some() {
                 let stvo = parse_table_as_value_object_struct(&self.ctx, &tbl, &columns);
                 hashm.insert(st.struct_name.to_string(), stvo);
             }
+            if tbcc.generate_param_struct {
+                let mtvo = parse_table_as_request_param_struct(&self.ctx, &tbl, &columns);
+                paramhm.insert(st.struct_name.to_string(), mtvo);
+            }
         }
 
         // 组织文件结构
         for sts in self.ctx.structs.clone() {
-            let stlist = if hashm.contains_key(&sts.struct_name.clone()) {
+
+            let mut stlist = vec![];
+            stlist.push(sts.clone());
+            if hashm.contains_key(&sts.struct_name.clone()) {
                 let mx = hashm[&sts.struct_name.clone()].clone();
-                vec![sts.clone(), mx]
-            } else {
-                vec![sts.clone()]
-            };
+                stlist.push(mx.clone());
+            }
+
+            if paramhm.contains_key(&sts.struct_name.clone()) {
+                let mx = paramhm[&sts.struct_name.clone()].clone();
+                stlist.push(mx.clone());
+            }
 
             let rfi = RustFileImpl {
                 file_name: format!("{}.rs", snake_case(sts.struct_name.clone().as_str())),
