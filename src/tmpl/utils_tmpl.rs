@@ -5,7 +5,8 @@ use std::fs::File;
 use std::mem::MaybeUninit;
 use std::sync::{Mutex, Once};
 use rbatis::rbatis::{Rbatis};
-use serde_derive::{Deserialize, Serialize};
+// use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use chrono::offset::Local;
 use chrono::DateTime;
 use jsonwebtoken::{EncodingKey, DecodingKey, Header};
@@ -345,7 +346,7 @@ enum StrOrBool {
     Bool(bool),
 }
 
-
+#[allow(dead_code)]
 pub fn u64_from_str<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where
     D: Deserializer<'de>,
@@ -356,18 +357,43 @@ where
     })
 }
 
-
-pub fn i64_from_str<'de, D>(deserializer: D) -> Result<i64, D::Error>
+#[allow(dead_code)]
+pub fn i64_from_str<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
 where
     D: Deserializer<'de>,
 {
     Ok(match StrOrI64::deserialize(deserializer)? {
-        StrOrI64::String(v) => v.parse().unwrap_or_default(),
-        StrOrI64::I64(v) => v,
+        StrOrI64::String(v) => match v.parse::<i64>() {
+            Ok(st) => {
+                Some(st)
+            }
+            Err(_) => {
+                None
+            }
+        },
+        StrOrI64::I64(v) => Some(v),
     })
 }
 
+#[allow(dead_code)]
+pub fn i32_from_str<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match StrOrI64::deserialize(deserializer)? {
+        StrOrI64::String(v) => match v.parse::<i64>() {
+            Ok(st) => {
+                Some(st as i32)
+            }
+            Err(_) => {
+                None
+            }
+        },
+        StrOrI64::I64(v) => Some(v as i32),
+    })
+}
 
+#[allow(dead_code)]
 pub fn f64_from_str<'de, D>(deserializer: D) -> Result<f64, D::Error>
 where
     D: Deserializer<'de>,
@@ -378,6 +404,7 @@ where
     })
 }
 
+#[allow(dead_code)]
 pub fn f32_from_str<'de, D>(deserializer: D) -> Result<f32, D::Error>
 where
     D: Deserializer<'de>,
@@ -388,7 +415,7 @@ where
     })
 }
 
-
+#[allow(dead_code)]
 pub fn bool_from_str<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
 where
     D: Deserializer<'de>,
@@ -415,6 +442,7 @@ where
         }
     })
 }
+
 
 
 
