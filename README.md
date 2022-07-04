@@ -132,3 +132,12 @@ PS：目前只支持的MySQL数据库。其它的数据库支持后面再来加�
 > 捐赠
 
 <img style="width: 400px;height: 545px;" width="400" height="545" src="https://gitee.com/poethxp/rbatis-generator/raw/master/wx_account.jpg" alt="enjoylost"/>
+
+
+#### 使用rbatis-generator的其它软件
+
+> 持续增加中...
+
+1. 海棠记账
+
+<img style="width: 200px; height: 200px;" width="200" height="200" src="https://gitee.com/poethxp/rbatis-generator/raw/master/begonia.jpg" alt="海棠记账"/>
