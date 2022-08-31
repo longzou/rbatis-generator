@@ -254,7 +254,7 @@ pub fn generate_func_update_for_struct(ctx: &GenerateContext, tbl: &TableInfo) -
     
     body.push(format!("let wp = rb.new_wrapper()"));
     for col in pkcols.clone() {
-        body.push(format!("    .eq(\"{}\", self.{})", col.column_name.clone().unwrap_or_default(), safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_string().to_lowercase())));
+        body.push(format!("    .eq(\"{}\", self.{}.clone())", col.column_name.clone().unwrap_or_default(), safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_string().to_lowercase())));
         body.push(format!("    .and()"));
     }
     body.remove(body.len() - 1);
@@ -320,7 +320,7 @@ pub fn generate_func_update_selective_for_struct(ctx: &GenerateContext, tbl: &Ta
     
     body.push(format!("let wp = rb.new_wrapper()"));
     for col in pkcols.clone() {
-        body.push(format!("    .eq(\"{}\", self.{})", col.column_name.clone().unwrap_or_default(), safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_string().to_lowercase())));
+        body.push(format!("    .eq(\"{}\", self.{}.clone())", col.column_name.clone().unwrap_or_default(), safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_string().to_lowercase())));
         body.push(format!("    .and()"));
     }
     body.remove(body.len() - 1);
@@ -371,7 +371,7 @@ pub fn generate_func_delete_for_struct(ctx: &GenerateContext, tbl: &TableInfo) -
     
     body.push(format!("let wp = rb.new_wrapper()"));
     for col in pkcols.clone() {
-        body.push(format!("    .eq(\"{}\", self.{})", col.column_name.clone().unwrap_or_default(), safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_string().to_lowercase())));
+        body.push(format!("    .eq(\"{}\", self.{}.clone())", col.column_name.clone().unwrap_or_default(), safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_string().to_lowercase())));
         body.push(format!("    .and()"));
     }
     body.remove(body.len() - 1);

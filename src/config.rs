@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::mem::MaybeUninit;
 use std::sync::{Mutex, Once};
-use std::fmt::{Debug};
+use std::fmt::{Debug, format};
+use redis::{FromRedisValue, RedisResult, Value, RedisError};
 use serde_derive::{Deserialize, Serialize};
 use rbatis::rbatis::{Rbatis};
 use substring::Substring;
@@ -12,6 +13,7 @@ use yaml_rust::Yaml;
 #[derive(Debug, Clone, Default)]
 pub struct AppConfig {
     pub mysql_conf: MysqlConfig,
+    pub redis_conf: RedisConfig,
     pub codegen_conf: CodeGenConfig,
 }
 
@@ -21,6 +23,34 @@ pub struct MysqlConfig {
     pub url: String,
     pub username: String,
     pub password: String
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct RedisConfig {
+    pub host: String,   // default is 127.0.0.1
+    pub port: i64,      // default is 6379
+    pub username: Option<String>, // default is None
+    pub password: Option<String>, // default is None
+    pub db: i64,        // default is 0
+    pub has_redis: bool, // default is false, if false, the redis will not be supportted
+}
+
+/**
+ * Redis's stored as json string
+ */
+impl FromRedisValue for RedisConfig {
+    
+    fn from_redis_value(v: &Value) -> RedisResult<Self> {
+        let r = String::from_redis_value(v);
+        match serde_json::from_str::<Self>(r.unwrap().as_str()) {
+            Ok(rt) => {
+                Ok(rt)
+            }
+            Err(err) => {
+                Err(RedisError::from((redis::ErrorKind::TypeError, "TypeError",  err.to_string())))
+            }
+        }
+    }
 }
 
 
@@ -52,7 +82,7 @@ lazy_static!{
 
 
 pub fn safe_struct_field_name (oldname: &String) -> String {
-    if (RUST_KEY_RENAME_MAP.contains_key(&oldname.to_lowercase())) {
+    if RUST_KEY_RENAME_MAP.contains_key(&oldname.to_lowercase()) {
         match RUST_KEY_RENAME_MAP.get(&oldname.to_lowercase()) {
             Some(tn) => {
                 tn.to_owned()
@@ -104,6 +134,40 @@ pub fn get_rbatis() -> &'static Rbatis {
 }
 
 
+pub fn get_redis_manager() -> &'static mut redis::aio::Connection {
+    // 使用MaybeUninit延迟初始化
+    static mut STATIC_RCM: MaybeUninit<redis::aio::Connection> = MaybeUninit::uninit();
+    // Once带锁保证只进行一次初始化
+    static ONCE_RCM: Once = Once::new();
+
+    ONCE_RCM.call_once(|| unsafe {
+        // CONF = 1u64;
+        let conf = AppConfig::get().lock().unwrap().to_owned();
+        let url = conf.mysql_conf.url.clone();
+        
+        async_std::task::block_on(async {
+            let cp = AppConfig::get().lock().unwrap().to_owned();
+            let redisstr = format!("redis://{}:{}@{}:{}/{}?pass={}",
+                cp.redis_conf.username.clone().unwrap_or_default(), cp.redis_conf.password.clone().unwrap_or_default(), 
+                cp.redis_conf.host.clone(), cp.redis_conf.port.clone(), cp.redis_conf.db.clone(), cp.redis_conf.password.clone().unwrap_or_default());
+            log::info!("Redis connect: {}", redisstr.clone());
+            let mut client = redis::Client::open(redisstr).unwrap();
+            
+            match client.get_async_connection().await {
+                Ok(rs) => {
+                    log::info!("Connected.");
+                    STATIC_RCM.as_mut_ptr().write(rs);
+                }
+                Err(err) => {
+                    log::info!("Error: {}", err);
+                }
+            };
+        });
+    });
+    unsafe { &mut *STATIC_RCM.as_mut_ptr() }
+}
+
+
 impl AppConfig {
   pub fn get() -> &'static Mutex<AppConfig> {
     // 使用MaybeUninit延迟初始化
@@ -113,7 +177,8 @@ impl AppConfig {
 
     ONCE.call_once(|| unsafe {
         CONF.as_mut_ptr().write(Mutex::new(AppConfig {
-          mysql_conf: MysqlConfig { url: "".to_string(), username: "".to_string(), password: "".to_string() },
+            mysql_conf: MysqlConfig { url: "".to_string(), username: "".to_string(), password: "".to_string() },
+            redis_conf: RedisConfig { host: "127.0.0.1".to_string(), port: 6379, username: None, password: None, db: 0, has_redis: false },
             codegen_conf: CodeGenConfig::default(),
         }));
     });
@@ -164,8 +229,49 @@ impl AppConfig {
     };
     
     self.mysql_conf = myconf;
+
+    let redis = &doc["redis"];
+
+    self.redis_conf = RedisConfig {
+        host: match redis["host"].as_str() {
+            Some(s) => s.to_string(),
+            None => "127.0.0.1".to_string()
+        },
+        port: match redis["port"].as_i64() {
+            Some(t) => t,
+            None => 6379i64,
+        },
+        db: match redis["db"].as_i64() {
+            Some(t) => t,
+            None => 0i64,
+        },
+        username: match redis["username"].as_str() {
+            Some(s) => Some(s.to_string()),
+            None => None
+        },
+        password: match redis["password"].as_str() {
+            Some(s) => Some(s.to_string()),
+            None => None
+        },
+        has_redis: match redis["enabled"].as_bool() {
+            Some(t) => t,
+            None => false
+        }
+    };
     self.codegen_conf = CodeGenConfig::load_from_yaml(&doc["codegen"]);
   }
+
+  pub fn redis() -> redis::Connection {
+    let cp = AppConfig::get().lock().unwrap().to_owned();
+    let redisstr = format!("redis://{}:{}@{}:{}/{}?pass={}",
+        cp.redis_conf.username.clone().unwrap_or_default(), cp.redis_conf.password.clone().unwrap_or_default(), 
+        cp.redis_conf.host.clone(), cp.redis_conf.port.clone(), cp.redis_conf.db.clone(), cp.redis_conf.password.clone().unwrap_or_default());
+    log::info!("Redis connect: {}", redisstr.clone());
+    let mut client = redis::Client::open(redisstr).unwrap();
+    
+    return client.get_connection().unwrap()
+  }
+
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -548,6 +654,7 @@ pub struct CodeGenConfig {
     pub always_override: bool,
     pub allow_number_widecard: bool,
     pub allow_bool_widecard: bool,
+    pub allow_redis_cache: bool,
     pub config_template_generate: Option<String>,
     pub always_generate_handler: bool,
     pub always_generate_entity: bool,
@@ -774,6 +881,11 @@ impl CodeGenConfig {
                 false
             },
             generate_for_lib: if let Some(s) = node["generate-for-lib"].as_bool() {
+                s.to_owned()
+            } else {
+                false
+            },
+            allow_redis_cache: if let Some(s) = node["allow-redis-cache"].as_bool() {
                 s.to_owned()
             } else {
                 false

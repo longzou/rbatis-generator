@@ -1,8 +1,12 @@
+use std::cell::Ref;
 use std::fmt::{Debug};
 use std::time::{SystemTime};
 use serde_derive::{Deserialize, Serialize};
 use chrono::offset::Local;
 use chrono::DateTime;
+use redis::aio::Connection;
+use redis::AsyncCommands;
+use crate::config::{AppConfig, get_redis_manager};
 
 
 pub fn num_to_string (n:i64) -> String {
@@ -120,4 +124,20 @@ impl<T> ApiResult<T> {
             timestamp: Some(ts)
         }
     }
+}
+
+
+pub async fn redis_get_string(key: &str) -> redis::RedisResult<String>
+{
+    let mut rcnn = get_redis_manager();
+    redis::cmd("GET").arg(key).query_async::<Connection, String>(&mut rcnn).await
+}
+
+pub async fn redis_set_string<'a, T>(key: &str, t: &T) -> redis::RedisResult<String>
+where
+    T: serde::ser::Serialize
+{
+    let mut rcnn = get_redis_manager();
+    let text = serde_json::to_string(t).unwrap_or_default();
+    redis::cmd("SET").arg(key).arg(text).query_async::<Connection, String>(&mut rcnn).await
 }

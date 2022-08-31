@@ -10,8 +10,8 @@ use rbatis::rbatis::Rbatis;
 use serde_derive::{Deserialize, Serialize};
 use crate::codegen::parse_table_as_struct;
 use crate::permission::ChimesPermissionInfo;
-use crate::tmpl::format_conf_tmpl;
-use crate::config::{CodeGenConfig, TableConfig, get_rbatis, safe_struct_field_name, RelationConfig, QueryConfig};
+use crate::tmpl::{format_conf_tmpl, format_redis_conf_tmpl};
+use crate::config::{CodeGenConfig, TableConfig, get_rbatis, safe_struct_field_name, RelationConfig, QueryConfig, RedisConfig};
 use crate::schema::{TableInfo, ColumnInfo};
 use substring::Substring;
 
@@ -29,6 +29,7 @@ pub trait CodeWriter {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct GenerateContext {
     pub codegen_conf: CodeGenConfig,
+    pub redis_conf: RedisConfig,
     pub tables: Vec<TableInfo>,
     pub columns: HashMap<String, Vec<ColumnInfo>>,
     pub structs: Vec<RustStruct>,
@@ -38,9 +39,10 @@ pub struct GenerateContext {
 
 impl GenerateContext {
 
-    pub fn create(cgconf: &CodeGenConfig) -> Self {
+    pub fn create(cgconf: &CodeGenConfig, redisconf: &RedisConfig) -> Self {
         Self {
             codegen_conf: cgconf.clone(), 
+            redis_conf: redisconf.clone(),
             tables: vec![], 
             columns: HashMap::new(), 
             structs: vec![],
@@ -83,7 +85,7 @@ impl GenerateContext {
 
     pub fn add_table(&mut self, tb: &TableInfo, cols: &Vec<ColumnInfo>) {
         if tb.table_name.is_some() {
-            log::info!("Add the table {} into the context.", tb.table_name.clone().unwrap_or_default());
+            // log::info!("Add the table {} into the context.", tb.table_name.clone().unwrap_or_default());
             self.tables.push(tb.clone());
             self.columns.insert(tb.table_name.clone().unwrap(), cols.clone());
         }
@@ -744,10 +746,10 @@ impl CodeGenerator {
                 Ok(tbop) => {
                     match tbop {
                         Some(tb) => {
-                            log::info!("Columns of table {} {} {} will be fetching.", tb.table_name.clone().unwrap_or_default(), tb.table_schema.clone().unwrap_or_default(), tb.table_catalog.clone().unwrap_or_default());
+                            // log::info!("Columns of table {} {} {} will be fetching.", tb.table_name.clone().unwrap_or_default(), tb.table_schema.clone().unwrap_or_default(), tb.table_catalog.clone().unwrap_or_default());
                             match ColumnInfo::load_columns(rb, &ts.clone(), &tn.clone()).await {
                                 Ok(cols) => {
-                                    log::info!("The table {} will be added.", tb.table_name.clone().unwrap_or_default());
+                                    // log::info!("The table {} will be added.", tb.table_name.clone().unwrap_or_default());
                                     self.ctx.add_table(&tb, &cols);
                                 }
                                 Err(err) => {
@@ -764,7 +766,7 @@ impl CodeGenerator {
                     log::info!("Load the table {} with an error {}", &f.name, err);
                 }
             };
-            log::info!("Table: {}, PK: {}", f.name, f.primary_key);
+            // log::info!("Table: {}, PK: {}", f.name, f.primary_key);
         }
 
 
@@ -778,7 +780,7 @@ impl CodeGenerator {
                 Ok(rt) => {
                     let st = parse_query_as_file(&self.ctx, &qry, &rt);
                     self.files.push(st);
-                    if (qry.generate_handler) {
+                    if qry.generate_handler {
                         let hl = parse_query_handler_as_file(&mut self.ctx, &qry, &rt);
                         self.files.push(hl);
                     }
@@ -953,8 +955,14 @@ impl CodeGenerator {
 
         let scoconf = conf.join("app.yml");
         let conftext = format_conf_tmpl(&self.ctx.codegen_conf.database_url.clone(), &self.ctx.codegen_conf.webserver_port.clone());
-        self.write_content(&scoconf.as_path().to_str().unwrap_or_default().to_string(), conftext.as_str()) ?;
 
+        if self.ctx.redis_conf.has_redis {
+            let redisconf = format_redis_conf_tmpl(&self.ctx.redis_conf.host, self.ctx.redis_conf.port.clone(), &self.ctx.redis_conf.username, &self.ctx.redis_conf.password, self.ctx.redis_conf.db.clone());
+            let wholeconf = conftext + redisconf.as_str();
+            self.write_content(&scoconf.as_path().to_str().unwrap_or_default().to_string(), wholeconf.as_str()) ?;
+        } else {
+            self.write_content(&scoconf.as_path().to_str().unwrap_or_default().to_string(), conftext.as_str()) ?;
+        }
         let mut modmap = HashMap::<String, Vec<String>>::new();
         let mut service_func: Vec<String> = Vec::new();
 
@@ -1087,7 +1095,7 @@ impl CodeGenerator {
                 api_method: ele.api_method,
                 api_bypass: ele.api_bypass,
             };
-            log::info!("Permission: {} {}", ele.name.clone(), ele.alias.clone());
+            // log::info!("Permission: {} {}", ele.name.clone(), ele.alias.clone());
 
             let mut query = ChimesPermissionInfo::default();
             query.alias = Some(ele.alias.clone());
@@ -1227,7 +1235,7 @@ pub fn parse_column_as_field(ctx: &GenerateContext, tbl: &TableConfig, col: &Col
 
     let annts = parse_data_type_annotions(ctx, &field_type);
 
-    log::info!("{} is {} -- {}.", col.column_name.clone().unwrap_or_default(), col.extra.clone().unwrap_or_default().to_lowercase(), col.column_key.clone().unwrap_or_default());
+    // log::info!("{} is {} -- {}.", col.column_name.clone().unwrap_or_default(), col.extra.clone().unwrap_or_default().to_lowercase(), col.column_key.clone().unwrap_or_default());
 
     let mut opt_field_name = None;
     let original_field_name = safe_struct_field_name(&col.column_name.clone().unwrap_or_default().to_lowercase());

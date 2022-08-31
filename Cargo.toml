@@ -31,6 +31,7 @@ substring = "1.4.0"
 change-case = "0.2.0"
 chrono = "0.4.19"
 async-std = "1.7.0"
-sqlx = {version="0.5.13", features = ["mysql", "runtime-tokio-rustls"] }
+sqlx = {version="0.5.13", features = ["mysql", "postgres", "runtime-tokio-rustls"] }
 rbatis = {version = "3.1.11", features = ["debug_mode"]}
 tokio = {version = "1.10", features = ["full", "rt-multi-thread"] }
+redis = {version = "0.21.0", features = ["tokio-comp", "connection-manager"]}

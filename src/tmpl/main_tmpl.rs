@@ -53,7 +53,9 @@ async fn main() -> std::io::Result<()> {
     let conf = appconf.clone();
     drop(appconf);
 
-    // let rb = utils::get_rbatis();
+    // 提前创建rbatis的连接池
+    // 实践证明，如果不提前建立连接池，在后面请求时再进行建立的话，很有可能会死锁
+    utils::get_rbatis();
 
     // 启动web服务
     start_web_server(&conf.webserver_conf).await

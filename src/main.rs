@@ -20,16 +20,27 @@ use crate::config::AppConfig;
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() -> std::io::Result<()> {
     // 加载配置文件
-    std::env::set_var("RUST_LOG", "rbatis=info");
-    let conf_path = std::env::current_dir().unwrap().as_os_str().to_str().unwrap().to_owned() + "/conf/rbatis.yml";
-    println!("Current Path: {}", conf_path);
-
+    std::env::set_var("RUST_LOG", "rbatis=warn");
     match fast_log::init(fast_log::config::Config::new().console()) {
         Ok (_) => {}
         Err(err) => {
             log::info!("An error occurred on the Logger initializing. {}", err);
         }
     };
+
+    let conf = std::env::args().nth(1);
+    let conf_path = if conf.is_none() {
+        std::env::current_dir().unwrap().as_os_str().to_str().unwrap().to_owned() + "/conf/rbatis.yml"
+    } else {
+        let conf_base = conf.unwrap();
+        if conf_base.starts_with("/") {
+            conf_base
+        } else {
+            std::env::current_dir().unwrap().as_os_str().to_str().unwrap().to_owned() + "/" + conf_base.as_str()
+        }
+    };
+
+    log::info!("Parsing rust-generator config file: {}", conf_path);
 
     // // 加载配置信息
     let mut webc = AppConfig::get().lock().unwrap();
@@ -38,10 +49,21 @@ async fn main() -> std::io::Result<()> {
     let conf = webc.clone();
     drop(webc);
 
+    let mut rcnn = AppConfig::redis();
+
+    match redis::cmd("GET").arg("h").query::<String>(&mut rcnn) {
+        Ok(r) => {
+            log::info!("Get the redis value: {}", r);
+        }
+        Err(err) => {
+            log::info!("The error is {}", err.to_string());
+        }
+    };
+
     let mut cgconf = conf.codegen_conf.clone();
     cgconf.database_url = conf.mysql_conf.url.clone();
 
-    let ctx = GenerateContext::create(&cgconf.clone());
+    let ctx = GenerateContext::create(&cgconf.clone(), &conf.redis_conf);
 
     let mut cg = CodeGenerator::new(&ctx);
     

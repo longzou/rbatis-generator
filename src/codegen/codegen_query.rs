@@ -38,7 +38,7 @@ pub async fn execute_sql(ctx: &GenerateContext, sql: &str, fds: &Vec<String>) ->
             // let tid = col.type_id().to_owned();
             column_text.push_str(col.name().to_string().as_str());
             column_text.push_str(",");
-            log::info!("Column: {} type is {}.", col.name().clone().to_string(), col.type_info().clone().name().to_string().to_lowercase());
+            // log::info!("Column: {} type is {}.", col.name().clone().to_string(), col.type_info().clone().name().to_string().to_lowercase());
             let field_type = parse_data_type_as_rust_type(&col.type_info().name().to_string().to_lowercase());
             let annts = parse_data_type_annotions(ctx, &field_type);
             let rsf = RustStructField {

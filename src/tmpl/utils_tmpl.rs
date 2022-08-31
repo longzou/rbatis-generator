@@ -161,10 +161,22 @@ pub fn get_rbatis() -> &'static Rbatis {
     unsafe { &*STATIC_RB.as_ptr() }
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct RedisConfig {
+    pub host: String,   // default is 127.0.0.1
+    pub port: i64,      // default is 6379
+    pub username: Option<String>, // default is None
+    pub password: Option<String>, // default is None
+    pub db: i64,        // default is 0
+    pub has_redis: bool, // default is false, if false, the redis will not be supportted
+}
+
+
 
 #[derive(Debug, Clone, Default)]
 pub struct AppConfig {
     pub db_conf: DatabaseConfig,
+    pub redis_conf: RedisConfig,
     pub webserver_conf: WebServerConfig,
 }
 
@@ -193,6 +205,7 @@ impl AppConfig {
       ONCE.call_once(|| unsafe {
           CONF.as_mut_ptr().write(Mutex::new(AppConfig {
             db_conf: DatabaseConfig { url: "".to_string() },
+            redis_conf: RedisConfig { host: "127.0.0.1".to_string(), port: 6379, username: None, password: None, db: 0, has_redis: false },
             webserver_conf: WebServerConfig { port: 10089i64, rsa_cert: String::new(), rsa_key: String::new(), rsa_password_private_key: String::new(), rsa_password_public_key: String::new() },
           }));
       });
@@ -225,6 +238,7 @@ impl AppConfig {
       let doc = &docs[0];
       let db = &doc["database"];
       let web = &doc["webserver"];
+      let redis = &doc["redis"];
       let dbconf = DatabaseConfig {
         url: if let Some(s) = db["url"].as_str() {
             s.to_owned()
@@ -259,7 +273,32 @@ impl AppConfig {
             String::new()
         }
       };
-      
+        self.redis_conf = RedisConfig {
+            host: match redis["host"].as_str() {
+                Some(s) => s.to_string(),
+                None => "127.0.0.1".to_string()
+            },
+            port: match redis["port"].as_i64() {
+                Some(t) => t,
+                None => 6379i64,
+            },
+            db: match redis["db"].as_i64() {
+                Some(t) => t,
+                None => 0i64,
+            },
+            username: match redis["username"].as_str() {
+                Some(s) => Some(s.to_string()),
+                None => None
+            },
+            password: match redis["password"].as_str() {
+                Some(s) => Some(s.to_string()),
+                None => None
+            },
+            has_redis: match redis["enabled"].as_bool() {
+                Some(t) => t,
+                None => false
+            }
+        };      
       self.db_conf = dbconf;
       self.webserver_conf = webconf;
     }

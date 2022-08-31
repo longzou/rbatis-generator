@@ -715,7 +715,7 @@ fn generate_func_update_for_relation(ctx: &GenerateContext, tbl: &RelationConfig
             } else {
             // if otp.middle_table.clone().is_some() {
                 body.push(format!("for row in self.{}s.clone() {{", targtblconf.api_handler_name));
-                body.push(format!("let mut sv_{} = row.clone();", tpc.api_handler_name.clone()));
+                body.push(format!("let mut rm_{} = row.clone();", tpc.api_handler_name.clone()));
                 body.push(format!("rm_{}.{} = self.{}.clone();", tpc.api_handler_name.clone(), otp.join_field.unwrap_or_default(), pkcolname.clone()));
              
                 body.push(format!("if rm_{}.{}.is_none() {{", tpc.api_handler_name.clone(), optpkcolname.clone()));
@@ -728,7 +728,7 @@ fn generate_func_update_for_relation(ctx: &GenerateContext, tbl: &RelationConfig
                 body.push(format!("Some(err)"));
                 body.push(format!("}}")); //  end of error
                 body.push(format!("}};")); // end of rm_{}
-                body.push(format!("}}")); // end of if
+                // body.push(format!("}}")); // end of if
                 body.push(format!("}} else {{"));
                 body.push(format!("ret = match rm_{}.update(rb).await {{", tpc.api_handler_name.clone()));
                 body.push(format!("Ok(_) => {{")); //  begin of Ok
@@ -741,7 +741,9 @@ fn generate_func_update_for_relation(ctx: &GenerateContext, tbl: &RelationConfig
                 body.push(format!("}};")); // end of rm_{}
                 body.push(format!("}}")); // end of if
                 body.push(format!("}}")); // end of for
+                body.push(format!("}}"));
             }
+            
         }
     }
 
