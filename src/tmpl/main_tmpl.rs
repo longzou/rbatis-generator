@@ -1,4 +1,4 @@
-const MAIN_TMPL:&str = r#"
+const MAIN_TMPL: &str = r#"
 #[macro_use]
 extern crate actix_web;
 
@@ -16,7 +16,6 @@ use actix_web::{middleware, App, HttpRequest, HttpResponse, HttpServer, Result};
 ${generated_mod_list}
 
 mod utils;
-use tokio::time;
 
 use crate::utils::{AppConfig, WebServerConfig};
 
@@ -48,10 +47,8 @@ async fn main() -> std::io::Result<()> {
     };
 
     // // 加载配置信息
-    let mut appconf = AppConfig::get().lock().unwrap();
-    appconf.load_yaml(&conf_path.clone()); 
-    let conf = appconf.clone();
-    drop(appconf);
+    AppConfig::get().lock().unwrap().load_yaml(&conf_path.clone());
+    let conf = AppConfig::get().lock().unwrap().clone();
 
     // 提前创建rbatis的连接池
     // 实践证明，如果不提前建立连接池，在后面请求时再进行建立的话，很有可能会死锁
@@ -88,7 +85,6 @@ ${generated_service_list}
 
 "#;
 
-
 pub fn format_main_template(modlist: Vec<String>, servicelist: Vec<String>) -> String {
     let mut mod_text = String::new();
     let mut svc_text = String::new();
@@ -100,9 +96,8 @@ pub fn format_main_template(modlist: Vec<String>, servicelist: Vec<String>) -> S
         svc_text.push_str(format!("            .service({})\n", xl).as_str());
     }
 
-    let cp = MAIN_TMPL.clone();
+    let cp = MAIN_TMPL;
 
     cp.replace("${generated_mod_list}", mod_text.as_str())
         .replace("${generated_service_list}", svc_text.as_str())
-    
 }

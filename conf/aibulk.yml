@@ -1,0 +1,142 @@
+database:
+  url: mysql://chimes:ks123456@127.0.0.1:3306/aibulking
+  username:
+  password: 
+redis:
+  host: 127.0.0.1
+  port: 6379
+  password: Kiloseed2019
+  db: 0
+  enabled: true
+
+codegen:
+  app-name: wms
+  app-authors: Long(long.zou@gmail.com)
+  app-edition: "2021"
+  app-version: 0.1.0
+  output-path: d:/temp/aibuilking/
+  always-generate-handler: true
+  always-generate-entity: true
+  always-override: true
+  allow-bool-widecard: true
+  allow-number-widecard: true
+  allow-redis-cache: true
+  multi-tenancy: true
+  api-handler-prefix: /api/v1
+  webserver-port: "10788"
+  schema-name: aibulking
+  tables:
+    - name: bulking_artifact
+      struct-name: AiArtifactInfo
+      primary-key: artifact_id
+      comment: AI材料信息
+      all-field-option: true
+      update-skip-fields: artifact_id
+      update-seletive: true
+      page-query: true
+      logic-deletion: true
+      api-handler-name: artifact
+      simple-funclist:
+      - func-name: load_channel
+        condition: channel_id
+        list: true
+        self-func: false
+        paged: true
+      - func-name: load_catalog
+        condition: catalog_id
+        list: true
+        self-func: false
+        paged: true
+      - func-name: load_channel_catalog
+        condition: channel_id,catalog_id
+        list: true
+        self-func: false
+        paged: true
+    - name: bulking_artifact_training_materia
+      struct-name: AiArtifactTrainingMateriaInfo
+      primary-key: materia_id
+      comment: 训练资料ID
+      all-field-option: true
+      update-skip-fields: materia_id
+      update-seletive: true
+      page-query: true
+      logic-deletion: true
+      api-handler-name: materia
+      simple-funclist:
+      - func-name: load_artifact
+        condition: artifact_id
+        list: true
+        self-func: false
+        paged: false
+    - name: shifts
+      struct-name: ShiftInfo
+      primary-key: id
+      comment: 班次管理
+      all-field-option: true
+      update-skip-fields: id
+      update-seletive: true
+      page-query: true
+      logic-deletion: true
+      api-handler-name: shifts
+    - name: employee_shifts
+      struct-name: EmployeeShiftInfo
+      primary-key: id
+      comment: 员工班次安排
+      all-field-option: true
+      update-skip-fields: id
+      update-seletive: true
+      page-query: true
+      logic-deletion: true
+      api-handler-name: shift_arrange
+      simple-funclist:
+      - func-name: load_by_shift
+        condition: shift_id, work_date
+        list: true
+        self-func: false
+        paged: true
+      - func-name: load_by_employee
+        condition: employee_id, work_date
+        list: true
+        self-func: false
+        paged: false
+      - func-name: load_by_period
+        condition: work_date
+        list: true
+        self-func: false
+        paged: false       
+  relations:
+    - struct-name: AiArtifactWithMateriaInfo
+      comment: 文章与训练资料
+      major-table: bulking_artifact
+      api-handler-name: artifact
+      extend-major: true
+      merge-table: true
+      generate-handler: true
+      generate-select: true
+      generate-save: true
+      generate-delete: true
+      generate-form: true
+      one-to-many:
+        - table-name: bulking_artifact_training_materia
+          join-field: artifact_id
+          major-field: artifact_id
+  queries:
+    - base-sql: select es.*, s.shift_name, s.begin_time, s.end_time  from employee_shifts es inner join shifts s on es.shift_id = s.id where 1 = 1
+      struct-name: QueryEmployeeShift
+      comment: 查询员工班次
+      generate-handler: true
+      single-result: false
+      api-handler-name: feedout
+      params:
+        - column-names: es.employee_id
+          column-types: bigint
+          default-value: 1
+      variant-params:
+        - column-names: es.shift_id
+          column-types: bigint
+          default-value: 1
+          variant: true
+        - column-names: s.shift_name
+          column-types: varchar
+          default-value: Default
+          variant: true

@@ -1,6 +1,6 @@
 use crate::config::CodeGenConfig;
 
-const CARGO_TMPL:&str = r#"
+const CARGO_TMPL: &str = r#"
 [package]
 authors = ["${authors}"]
 edition = "${edition}"
@@ -42,14 +42,16 @@ async-std = "1.7.0"
 rbatis = {version = "3.1.11", features = ["debug_mode"]}
 tokio = {version = "1.10", features = ["full", "rt-multi-thread"] }
 chimes-auth = {version = "0.1.0", features = ["session"]}
+chimes-utils = {version = "0.1.0"}
+chimes-rust = {version = "0.1.0"}
 captcha = "0.0.9"
 jsonwebtoken = "8.1.1"
 "#;
 
-
 pub fn replace_cargo_toml(ctx: &CodeGenConfig) -> String {
-    CARGO_TMPL.replace("${authors}", ctx.app_authors.as_str())
-              .replace("${edition}", ctx.app_edition.as_str())
-              .replace("${app_name}", ctx.app_name.as_str())
-              .replace("${app_version}", ctx.app_version.as_str())
+    CARGO_TMPL
+        .replace("${authors}", ctx.app_authors.as_str())
+        .replace("${edition}", ctx.app_edition.as_str())
+        .replace("${app_name}", ctx.app_name.as_str())
+        .replace("${app_version}", ctx.app_version.as_str())
 }

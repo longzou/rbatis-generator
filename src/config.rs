@@ -1,13 +1,15 @@
+use change_case::snake_case;
+use rbatis::rbatis::Rbatis;
+use redis::{FromRedisValue, RedisError, RedisResult, Value};
+use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::fs::File;
 use std::mem::MaybeUninit;
+use std::str::FromStr;
 use std::sync::{Mutex, Once};
-use std::fmt::{Debug, format};
-use redis::{FromRedisValue, RedisResult, Value, RedisError};
-use serde_derive::{Deserialize, Serialize};
-use rbatis::rbatis::{Rbatis};
 use substring::Substring;
-use change_case::snake_case;
+use tera::Tera;
 use yaml_rust::Yaml;
 
 #[derive(Debug, Clone, Default)]
@@ -17,86 +19,107 @@ pub struct AppConfig {
     pub codegen_conf: CodeGenConfig,
 }
 
-
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct MysqlConfig {
     pub url: String,
     pub username: String,
-    pub password: String
+    pub password: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RedisConfig {
-    pub host: String,   // default is 127.0.0.1
-    pub port: i64,      // default is 6379
+    pub host: String,             // default is 127.0.0.1
+    pub port: i64,                // default is 6379
     pub username: Option<String>, // default is None
     pub password: Option<String>, // default is None
-    pub db: i64,        // default is 0
-    pub has_redis: bool, // default is false, if false, the redis will not be supportted
+    pub db: i64,                  // default is 0
+    pub has_redis: bool,          // default is false, if false, the redis will not be supportted
 }
 
 /**
  * Redis's stored as json string
  */
 impl FromRedisValue for RedisConfig {
-    
     fn from_redis_value(v: &Value) -> RedisResult<Self> {
         let r = String::from_redis_value(v);
         match serde_json::from_str::<Self>(r.unwrap().as_str()) {
-            Ok(rt) => {
-                Ok(rt)
-            }
-            Err(err) => {
-                Err(RedisError::from((redis::ErrorKind::TypeError, "TypeError",  err.to_string())))
-            }
+            Ok(rt) => Ok(rt),
+            Err(err) => Err(RedisError::from((
+                redis::ErrorKind::TypeError,
+                "TypeError",
+                err.to_string(),
+            ))),
         }
     }
 }
 
-
-lazy_static!{
+lazy_static! {
     pub static ref RUST_KEY_RENAME_MAP: HashMap<String, String> = {
-      let mut hm = HashMap::new();
-      hm.insert("type".to_string(), "r#type".to_string());
-      hm.insert("struct".to_string(), "r#struct".to_string());
-      hm.insert("pub".to_string(), "r#pub".to_string());
-      hm.insert("static".to_string(), "r#static".to_string());
-      hm.insert("else".to_string(), "r#else".to_string());
-      hm.insert("while".to_string(), "r#while".to_string());
-      hm.insert("async".to_string(), "r#async".to_string());
-      hm.insert("const".to_string(), "r#const".to_string());
-      hm.insert("use".to_string(), "r#use".to_string());
-      hm.insert("mod".to_string(), "r#mod".to_string());
-      hm.insert("main".to_string(), "r#main".to_string());
-      hm.insert("match".to_string(), "r#match".to_string());
-      hm.insert("let".to_string(), "r#let".to_string());
-      hm.insert("mut".to_string(), "r#mut".to_string());
-      hm.insert("crate".to_string(), "r#crate".to_string());
-      hm.insert("if".to_string(), "r#if".to_string());
-      hm.insert("return".to_string(), "r#return".to_string());
-      hm.insert("self".to_string(), "r#self".to_string());
-      
-      return hm;
+        let mut hm = HashMap::new();
+        hm.insert("type".to_string(), "r#type".to_string());
+        hm.insert("struct".to_string(), "r#struct".to_string());
+        hm.insert("pub".to_string(), "r#pub".to_string());
+        hm.insert("static".to_string(), "r#static".to_string());
+        hm.insert("else".to_string(), "r#else".to_string());
+        hm.insert("while".to_string(), "r#while".to_string());
+        hm.insert("async".to_string(), "r#async".to_string());
+        hm.insert("const".to_string(), "r#const".to_string());
+        hm.insert("use".to_string(), "r#use".to_string());
+        hm.insert("mod".to_string(), "r#mod".to_string());
+        hm.insert("main".to_string(), "r#main".to_string());
+        hm.insert("match".to_string(), "r#match".to_string());
+        hm.insert("let".to_string(), "r#let".to_string());
+        hm.insert("mut".to_string(), "r#mut".to_string());
+        hm.insert("crate".to_string(), "r#crate".to_string());
+        hm.insert("if".to_string(), "r#if".to_string());
+        hm.insert("return".to_string(), "r#return".to_string());
+        hm.insert("self".to_string(), "r#self".to_string());
+
+        return hm;
     };
 }
 
+lazy_static! {
+    pub static ref TEMPLATES: Tera = {
+        let mut tera = match Tera::new("templates/**/*") {
+            Ok(t) => t,
+            Err(e) => {
+                println!("Parsing error(s): {}", e);
+                ::std::process::exit(1);
+            }
+        };
+        tera.autoescape_on(vec!["html", ".sql"]);
+        tera.build_inheritance_chains().unwrap();
+        // tera.register_filter("do_nothing", do_nothing_filter);
+        tera
+    };
+}
 
-pub fn safe_struct_field_name (oldname: &String) -> String {
-    if RUST_KEY_RENAME_MAP.contains_key(&oldname.to_lowercase()) {
-        match RUST_KEY_RENAME_MAP.get(&oldname.to_lowercase()) {
-            Some(tn) => {
-                tn.to_owned()
-            }
-            None => {
-                oldname.to_owned()
-            }
+pub fn safe_struct_field_name(oldname: &String) -> String {
+    let m_oldname = oldname.clone();
+    let reg = regex::Regex::from_str("\\.").unwrap();
+    let arrnames = reg
+        .split(&m_oldname)
+        .map(|f| f.to_string())
+        .collect::<Vec<String>>();
+    // let arrnames = m_oldname.split("[\\.]").map(|f| f.to_string()).collect::<Vec<String>>();
+    let n_oldname = if arrnames.len() > 1usize {
+        arrnames[1].clone()
+    } else {
+        m_oldname.clone()
+    };
+
+    if RUST_KEY_RENAME_MAP.contains_key(&n_oldname.to_lowercase()) {
+        match RUST_KEY_RENAME_MAP.get(&n_oldname.to_lowercase()) {
+            Some(tn) => tn.to_owned(),
+            None => n_oldname.to_owned(),
         }
     } else {
-        oldname.to_owned()
+        n_oldname.to_owned()
     }
 }
 
-lazy_static!{
+lazy_static! {
     pub static ref RB: Rbatis = {
       let rb = Rbatis::new();
       // log!("Connect to database {} ", conf.mysql_conf.url.clone());
@@ -115,7 +138,7 @@ pub fn get_rbatis() -> &'static Rbatis {
         // CONF = 1u64;
         let conf = AppConfig::get().lock().unwrap().to_owned();
         let url = conf.mysql_conf.url.clone();
-        
+
         async_std::task::block_on(async {
             let rb = Rbatis::new();
             log::info!("Make the database connection {}", url.clone());
@@ -133,7 +156,7 @@ pub fn get_rbatis() -> &'static Rbatis {
     unsafe { &*STATIC_RB.as_ptr() }
 }
 
-
+#[allow(dead_code)]
 pub fn get_redis_manager() -> &'static mut redis::aio::Connection {
     // 使用MaybeUninit延迟初始化
     static mut STATIC_RCM: MaybeUninit<redis::aio::Connection> = MaybeUninit::uninit();
@@ -143,16 +166,22 @@ pub fn get_redis_manager() -> &'static mut redis::aio::Connection {
     ONCE_RCM.call_once(|| unsafe {
         // CONF = 1u64;
         let conf = AppConfig::get().lock().unwrap().to_owned();
-        let url = conf.mysql_conf.url.clone();
-        
+        let _url = conf.mysql_conf.url.clone();
+
         async_std::task::block_on(async {
             let cp = AppConfig::get().lock().unwrap().to_owned();
-            let redisstr = format!("redis://{}:{}@{}:{}/{}?pass={}",
-                cp.redis_conf.username.clone().unwrap_or_default(), cp.redis_conf.password.clone().unwrap_or_default(), 
-                cp.redis_conf.host.clone(), cp.redis_conf.port.clone(), cp.redis_conf.db.clone(), cp.redis_conf.password.clone().unwrap_or_default());
+            let redisstr = format!(
+                "redis://{}:{}@{}:{}/{}?pass={}",
+                cp.redis_conf.username.clone().unwrap_or_default(),
+                cp.redis_conf.password.clone().unwrap_or_default(),
+                cp.redis_conf.host.clone(),
+                cp.redis_conf.port.clone(),
+                cp.redis_conf.db.clone(),
+                cp.redis_conf.password.clone().unwrap_or_default()
+            );
             log::info!("Redis connect: {}", redisstr.clone());
-            let mut client = redis::Client::open(redisstr).unwrap();
-            
+            let client = redis::Client::open(redisstr).unwrap();
+
             match client.get_async_connection().await {
                 Ok(rs) => {
                     log::info!("Connected.");
@@ -167,117 +196,132 @@ pub fn get_redis_manager() -> &'static mut redis::aio::Connection {
     unsafe { &mut *STATIC_RCM.as_mut_ptr() }
 }
 
-
 impl AppConfig {
-  pub fn get() -> &'static Mutex<AppConfig> {
-    // 使用MaybeUninit延迟初始化
-    static mut CONF: MaybeUninit<Mutex<AppConfig>> = MaybeUninit::uninit();
-    // Once带锁保证只进行一次初始化
-    static ONCE: Once = Once::new();
+    pub fn get() -> &'static Mutex<AppConfig> {
+        // 使用MaybeUninit延迟初始化
+        static mut CONF: MaybeUninit<Mutex<AppConfig>> = MaybeUninit::uninit();
+        // Once带锁保证只进行一次初始化
+        static ONCE: Once = Once::new();
 
-    ONCE.call_once(|| unsafe {
-        CONF.as_mut_ptr().write(Mutex::new(AppConfig {
-            mysql_conf: MysqlConfig { url: "".to_string(), username: "".to_string(), password: "".to_string() },
-            redis_conf: RedisConfig { host: "127.0.0.1".to_string(), port: 6379, username: None, password: None, db: 0, has_redis: false },
-            codegen_conf: CodeGenConfig::default(),
-        }));
-    });
-    unsafe { &*CONF.as_ptr() }
-  }
+        ONCE.call_once(|| unsafe {
+            CONF.as_mut_ptr().write(Mutex::new(AppConfig {
+                mysql_conf: MysqlConfig {
+                    url: "".to_string(),
+                    username: "".to_string(),
+                    password: "".to_string(),
+                },
+                redis_conf: RedisConfig {
+                    host: "127.0.0.1".to_string(),
+                    port: 6379,
+                    username: None,
+                    password: None,
+                    db: 0,
+                    has_redis: false,
+                },
+                codegen_conf: CodeGenConfig::default(),
+            }));
+        });
+        unsafe { &*CONF.as_ptr() }
+    }
 
+    #[allow(dead_code)]
+    pub fn load_yaml(&mut self, conf_path: &str) {
+        use yaml_rust::yaml;
+        // open file
+        let mut f = match File::open(conf_path) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        let mut s = String::new();
+        use std::io::Read;
 
-  pub fn load_yaml(&mut self, conf_path: &str) {
-    use yaml_rust::yaml;
-    // open file
-    let mut f = match File::open(conf_path) {
-        Ok(f) => f,
-        Err(_) => {
-            return
-        }
-    };
-    let mut s = String::new();
-    use std::io::Read;
-    
-    match f.read_to_string(&mut s) {
-      Ok(_) => {}
-      Err(_) => {}
-    };
-    // f.read_to_string(&mut s).unwrap(); // read file content to s
-    // load string to yaml loader
-    let docs = yaml::YamlLoader::load_from_str(&s).unwrap();
-    // get first yaml hash doc
-    // get server value
-    // let server = yaml_doc["weapp"].clone();
-    let doc = &docs[0];
-    let mysql = &doc["database"];
-    let myconf = MysqlConfig {
-      url: if let Some(s) = mysql["url"].as_str() {
-          s.to_owned()
-      } else {
-          "".to_owned()
-      },
-      username: if let Some(s) = mysql["username"].as_str() {
-          s.to_owned()
-      } else {
-          "".to_owned()
-      },
-      password: if let Some(s) = mysql["password"].as_str() {
-          s.to_owned()
-      } else {
-          "".to_owned()
-      }
-    };
-    
-    self.mysql_conf = myconf;
+        match f.read_to_string(&mut s) {
+            Ok(_) => {}
+            Err(_) => {}
+        };
+        // f.read_to_string(&mut s).unwrap(); // read file content to s
+        // load string to yaml loader
+        let docs = yaml::YamlLoader::load_from_str(&s).unwrap();
+        // get first yaml hash doc
+        // get server value
+        // let server = yaml_doc["weapp"].clone();
+        let doc = &docs[0];
+        let mysql = &doc["database"];
+        let myconf = MysqlConfig {
+            url: if let Some(s) = mysql["url"].as_str() {
+                s.to_owned()
+            } else {
+                "".to_owned()
+            },
+            username: if let Some(s) = mysql["username"].as_str() {
+                s.to_owned()
+            } else {
+                "".to_owned()
+            },
+            password: if let Some(s) = mysql["password"].as_str() {
+                s.to_owned()
+            } else {
+                "".to_owned()
+            },
+        };
 
-    let redis = &doc["redis"];
+        self.mysql_conf = myconf;
 
-    self.redis_conf = RedisConfig {
-        host: match redis["host"].as_str() {
-            Some(s) => s.to_string(),
-            None => "127.0.0.1".to_string()
-        },
-        port: match redis["port"].as_i64() {
-            Some(t) => t,
-            None => 6379i64,
-        },
-        db: match redis["db"].as_i64() {
-            Some(t) => t,
-            None => 0i64,
-        },
-        username: match redis["username"].as_str() {
-            Some(s) => Some(s.to_string()),
-            None => None
-        },
-        password: match redis["password"].as_str() {
-            Some(s) => Some(s.to_string()),
-            None => None
-        },
-        has_redis: match redis["enabled"].as_bool() {
-            Some(t) => t,
-            None => false
-        }
-    };
-    self.codegen_conf = CodeGenConfig::load_from_yaml(&doc["codegen"]);
-  }
+        let redis = &doc["redis"];
 
-  pub fn redis() -> redis::Connection {
-    let cp = AppConfig::get().lock().unwrap().to_owned();
-    let redisstr = format!("redis://{}:{}@{}:{}/{}?pass={}",
-        cp.redis_conf.username.clone().unwrap_or_default(), cp.redis_conf.password.clone().unwrap_or_default(), 
-        cp.redis_conf.host.clone(), cp.redis_conf.port.clone(), cp.redis_conf.db.clone(), cp.redis_conf.password.clone().unwrap_or_default());
-    log::info!("Redis connect: {}", redisstr.clone());
-    let mut client = redis::Client::open(redisstr).unwrap();
-    
-    return client.get_connection().unwrap()
-  }
+        self.redis_conf = RedisConfig {
+            host: match redis["host"].as_str() {
+                Some(s) => s.to_string(),
+                None => "127.0.0.1".to_string(),
+            },
+            port: match redis["port"].as_i64() {
+                Some(t) => t,
+                None => 6379i64,
+            },
+            db: match redis["db"].as_i64() {
+                Some(t) => t,
+                None => 0i64,
+            },
+            username: match redis["username"].as_str() {
+                Some(s) => Some(s.to_string()),
+                None => None,
+            },
+            password: match redis["password"].as_str() {
+                Some(s) => Some(s.to_string()),
+                None => None,
+            },
+            has_redis: match redis["enabled"].as_bool() {
+                Some(t) => t,
+                None => false,
+            },
+        };
+        self.codegen_conf = CodeGenConfig::load_from_yaml(&doc["codegen"]);
+    }
 
+    #[allow(dead_code)]
+    pub fn redis() -> redis::Connection {
+        let cp = AppConfig::get().lock().unwrap().to_owned();
+        let redisstr = format!(
+            "redis://{}:{}@{}:{}/{}?pass={}",
+            cp.redis_conf.username.clone().unwrap_or_default(),
+            cp.redis_conf.password.clone().unwrap_or_default(),
+            cp.redis_conf.host.clone(),
+            cp.redis_conf.port.clone(),
+            cp.redis_conf.db.clone(),
+            cp.redis_conf.password.clone().unwrap_or_default()
+        );
+        log::info!("Redis connect: {}", redisstr.clone());
+        let client = redis::Client::open(redisstr).unwrap();
+
+        return client.get_connection().unwrap();
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct  SimpleFuncation {
+pub struct SimpleFuncation {
     pub fun_name: String,
     pub condition: String,
+    pub param_optional: bool,
     pub is_list: bool,
     pub is_paged: bool,
     pub is_self: bool,
@@ -297,10 +341,17 @@ pub struct TableConfig {
     pub update_seletive: bool,
     pub default_sort_field: Option<String>,
     pub generate_param_struct: bool,
+    pub using_common_search: bool,
+    pub with_attachment: bool,
     pub page_query: bool,
     pub logic_deletion: bool,
+    pub cache_by_fields: Option<String>, // TODO: give a field and generate related cache method get/set/del
+    pub full_text_columns: Option<String>,
+    pub datetime_between_columns: Option<String>,
+    pub in_columns: Option<String>,
+    pub in_spliter: Option<String>,
     pub generate_handler: bool,
-    pub simple_funclist: Vec<SimpleFuncation>,  //定义简单的查询方法，根据指定的字段来进行简单的查询
+    pub simple_funclist: Vec<SimpleFuncation>, //定义简单的查询方法，根据指定的字段来进行简单的查询
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -325,7 +376,6 @@ pub struct QueryConfig {
 }
 
 impl QueryConfig {
-    
     fn load_from_yaml_node(node: &Yaml) -> Vec<Self> {
         let mut list = vec![];
         match node.as_vec() {
@@ -336,8 +386,7 @@ impl QueryConfig {
                     list.push(st);
                 }
             }
-            None => {
-            }
+            None => {}
         };
         list
     }
@@ -346,23 +395,19 @@ impl QueryConfig {
         self.struct_name = node["struct-name"].as_str().unwrap_or_default().to_string();
         self.comment = node["comment"].as_str().unwrap_or_default().to_string();
         self.api_handler_name = match node["api-handler-name"].as_str() {
-            Some (tstr) => tstr.to_string(),
+            Some(tstr) => tstr.to_string(),
             None => {
                 let stname = snake_case(self.struct_name.clone().as_str());
                 match stname.find("_") {
-                    Some(us) => {
-                        stname.substring(us + 1, stname.len()).to_string()
-                    }
-                    None => {
-                        stname
-                    }
+                    Some(us) => stname.substring(us + 1, stname.len()).to_string(),
+                    None => stname,
                 }
             }
         };
         self.base_sql = node["base-sql"].as_str().unwrap_or_default().to_string();
         self.single_result = match node["single-result"].as_bool() {
             Some(tt) => tt,
-            None => false
+            None => false,
         };
         self.generate_handler = node["generate-handler"].as_bool().unwrap_or_default();
 
@@ -373,90 +418,54 @@ impl QueryConfig {
                 for mcn in vp.clone() {
                     let pm = QueryParam {
                         column_names: match mcn["column-names"].as_str() {
-                            Some(s) => {
-                                Some(s.to_string())
-                            }
-                            None => {
-                                None
-                            }
+                            Some(s) => Some(s.to_string()),
+                            None => None,
                         },
                         column_types: match mcn["column-types"].as_str() {
-                            Some(s) => {
-                                Some(s.to_string())
-                            }
-                            None => {
-                                None
-                            }
+                            Some(s) => Some(s.to_string()),
+                            None => None,
                         },
                         column_express: match mcn["column-express"].as_str() {
-                            Some(s) => {
-                                Some(s.to_string())
-                            }
-                            None => {
-                                None
-                            }
+                            Some(s) => Some(s.to_string()),
+                            None => None,
                         },
                         default_value: match mcn["default-value"].as_str() {
-                            Some(s) => {
-                                Some(s.to_string())
-                            }
-                            None => {
-                                None
-                            }
+                            Some(s) => Some(s.to_string()),
+                            None => None,
                         },
-                        variant: false
+                        variant: false,
                     };
                     params.push(pm);
                 }
             }
-            None => {
-                
-            }
+            None => {}
         };
         match node["variant-params"].as_vec() {
             Some(vp) => {
                 for mcn in vp.clone() {
                     let pm = QueryParam {
                         column_names: match mcn["column-names"].as_str() {
-                            Some(s) => {
-                                Some(s.to_string())
-                            }
-                            None => {
-                                None
-                            }
+                            Some(s) => Some(s.to_string()),
+                            None => None,
                         },
                         column_types: match mcn["column-types"].as_str() {
-                            Some(s) => {
-                                Some(s.to_string())
-                            }
-                            None => {
-                                None
-                            }
+                            Some(s) => Some(s.to_string()),
+                            None => None,
                         },
                         column_express: match mcn["column-express"].as_str() {
-                            Some(s) => {
-                                Some(s.to_string())
-                            }
-                            None => {
-                                None
-                            }
+                            Some(s) => Some(s.to_string()),
+                            None => None,
                         },
                         default_value: match mcn["default-value"].as_str() {
-                            Some(s) => {
-                                Some(s.to_string())
-                            }
-                            None => {
-                                None
-                            }
+                            Some(s) => Some(s.to_string()),
+                            None => None,
                         },
-                        variant: true
+                        variant: true,
                     };
                     vtparams.push(pm);
                 }
             }
-            None => {
-                
-            }
+            None => {}
         };
         self.params = params;
         self.variant_params = vtparams;
@@ -469,23 +478,23 @@ pub struct Relationship {
     pub join_field: Option<String>,
     pub major_field: Option<String>,
     pub middle_table: Option<String>,
+    pub use_dialog_form: bool,
     pub readonly: bool,
 }
 
 impl Relationship {
-    
+    #[allow(dead_code)]
     fn load_from_yaml_node(node: &Yaml) -> Vec<Self> {
         let mut list = vec![];
         match node.as_vec() {
             Some(ns) => {
                 for nd in ns.clone() {
-                    let mut st = Self::default();
+                    let _st = Self::default();
                     let rl = Self::load_by_node(&nd);
                     list.push(rl);
                 }
             }
-            None => {
-            }
+            None => {}
         };
         list
     }
@@ -493,52 +502,34 @@ impl Relationship {
     fn load_by_node(ts: &Yaml) -> Self {
         Relationship {
             table_name: match ts["table-name"].as_str() {
-                Some(tr) => {
-                    Some(tr.to_string())
-                }
-                None => {
-                    None
-                }
+                Some(tr) => Some(tr.to_string()),
+                None => None,
             },
             join_field: match ts["join-field"].as_str() {
-                Some(tr) => {
-                    Some(tr.to_string())
-                }
-                None => {
-                    None
-                }
+                Some(tr) => Some(tr.to_string()),
+                None => None,
             },
             major_field: match ts["major-field"].as_str() {
-                Some(tr) => {
-                    Some(tr.to_string())
-                }
+                Some(tr) => Some(tr.to_string()),
                 None => {
                     // If the major field was not defined, we will use the same value of join-field
                     match ts["join-field"].as_str() {
-                        Some(tr) => {
-                            Some(tr.to_string())
-                        }
-                        None => {
-                            None
-                        }
+                        Some(tr) => Some(tr.to_string()),
+                        None => None,
                     }
                 }
             },
             middle_table: match ts["middle-table"].as_str() {
-                Some(tr) => {
-                    Some(tr.to_string())
-                }
-                None => {
-                    None
-                }
+                Some(tr) => Some(tr.to_string()),
+                None => None,
+            },
+            use_dialog_form: match ts["use-dialog-form"].as_bool() {
+                Some(tr) => tr,
+                None => false,
             },
             readonly: match ts["readonly"].as_bool() {
-                Some(tr) => {
-                    tr
-                }
-                None => {
-                    false
-                }
+                Some(tr) => tr,
+                None => false,
             },
         }
     }
@@ -555,12 +546,13 @@ pub struct RelationConfig {
     pub generate_save: bool,
     // pub generate_update: bool,
     pub generate_delete: bool,
+    pub deleted_by_relation: bool,
     pub generate_handler: bool,
+    pub generate_form: bool,
     pub api_handler_name: Option<String>,
 }
 
 impl RelationConfig {
-    
     fn load_from_yaml_node(node: &Yaml) -> Vec<Self> {
         let mut list = vec![];
         match node.as_vec() {
@@ -571,8 +563,7 @@ impl RelationConfig {
                     list.push(st);
                 }
             }
-            None => {
-            }
+            None => {}
         };
         log::info!("Loaded relations: {}", list.len());
         list
@@ -584,33 +575,29 @@ impl RelationConfig {
         self.comment = node["comment"].as_str().unwrap_or_default().to_string();
         log::info!("Loaded the struct name: {}", self.struct_name.clone());
         self.api_handler_name = match node["api-handler-name"].as_str() {
-            Some (tstr) => Some(tstr.to_string()),
+            Some(tstr) => Some(tstr.to_string()),
             None => {
                 let stname = snake_case(self.struct_name.clone().as_str());
                 match stname.find("_") {
-                    Some(us) => {
-                        Some(stname.substring(us + 1, stname.len()).to_string())
-                    }
-                    None => {
-                        Some(stname)
-                    }
+                    Some(us) => Some(stname.substring(us + 1, stname.len()).to_string()),
+                    None => Some(stname),
                 }
             }
         };
 
-        // Relationship will be generate basic select to load one-row, 
+        // Relationship will be generate basic select to load one-row,
         // Relationships don't fetch list or pages
         // If you want to load more by relationship, we suggest to write the query directly.
         self.generate_handler = node["generate-handler"].as_bool().unwrap_or_default();
         self.generate_select = node["generate-select"].as_bool().unwrap_or_default();
         self.generate_save = node["generate-save"].as_bool().unwrap_or_default();
+        self.generate_form = node["generate-form"].as_bool().unwrap_or_default();
         // self.generate_update = node["generate-update"].as_bool().unwrap_or_default();
         self.generate_delete = node["generate-delete"].as_bool().unwrap_or_default();
-
+        self.deleted_by_relation = node["deleted-by-relation"].as_bool().unwrap_or_default();
         // Extend the major table as field
         self.extend_major = node["extend-major"].as_bool().unwrap_or_default();
 
-        
         self.one_to_one = match node["one-to-one"].as_vec() {
             Some(vts) => {
                 let mut rels = vec![];
@@ -622,7 +609,7 @@ impl RelationConfig {
             }
             None => {
                 vec![]
-            },
+            }
         };
 
         self.one_to_many = match node["one-to-many"].as_vec() {
@@ -636,11 +623,10 @@ impl RelationConfig {
             }
             None => {
                 vec![]
-            },            
+            }
         };
     }
 }
-
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct CodeGenConfig {
@@ -658,6 +644,7 @@ pub struct CodeGenConfig {
     pub config_template_generate: Option<String>,
     pub always_generate_handler: bool,
     pub always_generate_entity: bool,
+    pub multi_tenancy: bool, // if true, 所有的Handler方法加入su: SystemUser<ChimesUserInfo>，并自动检查条件，JSON体中的company_id，modify_by, modify_user_id, modify_user_name的值
     pub api_handler_prefix: String,
     pub schema_name: String,
     pub webserver_port: String,
@@ -667,9 +654,7 @@ pub struct CodeGenConfig {
     pub relations: Vec<RelationConfig>,
 }
 
-
 impl CodeGenConfig {
-
     pub fn load_from_yaml(node: &Yaml) -> Self {
         let mut tables = Vec::new();
 
@@ -685,124 +670,117 @@ impl CodeGenConfig {
                     tables.push(TableConfig {
                         name: tbn["name"].as_str().unwrap_or_default().to_string(),
                         comment: match tbn["comment"].as_str() {
-                            Some(tstr) => {
-                                tstr.to_string()
-                            }
+                            Some(tstr) => tstr.to_string(),
                             None => {
-                                log::info!("Unable to read comment: {}", tbn["struct-name"].as_str().unwrap_or_default().to_string());
-                                tbn["struct-name"].as_str().unwrap_or_default().to_uppercase()
+                                log::info!(
+                                    "Unable to read comment: {}",
+                                    tbn["struct-name"].as_str().unwrap_or_default().to_string()
+                                );
+                                tbn["struct-name"]
+                                    .as_str()
+                                    .unwrap_or_default()
+                                    .to_uppercase()
                             }
                         },
                         struct_name: tbn["struct-name"].as_str().unwrap_or_default().to_string(),
                         primary_key: tbn["primary-key"].as_str().unwrap_or_default().to_string(),
                         api_handler_name: match tbn["api-handler-name"].as_str() {
-                            Some (tstr) => tstr.to_string(),
-                            None => {
-                                match tbn["struct-name"].as_str() {
-                                    Some(sstr) => {
-                                        let stname = snake_case(sstr.to_string().as_str());
-                                        match stname.find("_") {
-                                            Some(us) => {
-                                                stname.substring(us + 1, stname.len()).to_string()
-                                            }
-                                            None => {
-                                                stname
-                                            }
+                            Some(tstr) => tstr.to_string(),
+                            None => match tbn["struct-name"].as_str() {
+                                Some(sstr) => {
+                                    let stname = snake_case(sstr.to_string().as_str());
+                                    match stname.find("_") {
+                                        Some(us) => {
+                                            stname.substring(us + 1, stname.len()).to_string()
                                         }
-                                    }
-                                    None =>  {
-                                        let tblname = tbn["name"].as_str().unwrap().to_string().to_lowercase();
-                                        match tblname.find("_") {
-                                            Some(us) => {
-                                                tblname.substring(us + 1, tblname.len()).to_string()
-                                            }
-                                            None => {
-                                                tblname
-                                            }
-                                        }
+                                        None => stname,
                                     }
                                 }
-                            }
+                                None => {
+                                    let tblname =
+                                        tbn["name"].as_str().unwrap().to_string().to_lowercase();
+                                    match tblname.find("_") {
+                                        Some(us) => {
+                                            tblname.substring(us + 1, tblname.len()).to_string()
+                                        }
+                                        None => tblname,
+                                    }
+                                }
+                            },
                         },
                         update_skip_fields: match tbn["update-skip-fields"].as_str() {
-                            Some(tstr) => {
-                                Some(tstr.to_string())
-                            }
-                            None => {
-                                None
-                            }
+                            Some(tstr) => Some(tstr.to_string()),
+                            None => None,
+                        },
+                        cache_by_fields: match tbn["cache-by-fields"].as_str() {
+                            // 根据指定的字段的值来生成Cache操作（get/set/del）
+                            Some(tstr) => Some(tstr.to_string()),
+                            None => None,
                         },
                         tree_parent_field: match tbn["tree-parent-field"].as_str() {
-                            Some(tstr) => {
-                                Some(tstr.to_string())
-                            }
-                            None => {
-                                None
-                            }
+                            Some(tstr) => Some(tstr.to_string()),
+                            None => None,
                         },
                         tree_root_value: match tbn["tree-root-value"].as_str() {
-                            Some(tstr) => {
-                                Some(tstr.to_string())
-                            }
-                            None => {
-                                Some("null".to_string())
-                            }
+                            Some(tstr) => Some(tstr.to_string()),
+                            None => Some("null".to_string()),
                         },
                         all_field_option: match tbn["all-field-option"].as_bool() {
-                            Some(ff) => {
-                                ff
-                            }
-                            None => {
-                                true
-                            }
+                            Some(ff) => ff,
+                            None => true,
                         },
                         generate_param_struct: match tbn["generate-param-struct"].as_bool() {
-                            Some(ff) => {
-                                ff
-                            }
-                            None => {
-                                false
-                            }
+                            Some(ff) => ff,
+                            None => false,
                         },
                         default_sort_field: match tbn["default-sort-field"].as_str() {
-                            Some(tstr) => {
-                                Some(tstr.to_string())
-                            }
-                            None => {
-                                None
-                            }
+                            Some(tstr) => Some(tstr.to_string()),
+                            None => None,
+                        },
+                        full_text_columns: match tbn["full-text-columns"].as_str() {
+                            Some(tstr) => Some(tstr.to_string()),
+                            None => None,
+                        },
+                        datetime_between_columns: match tbn["datetime-between-columns"].as_str() {
+                            Some(tstr) => Some(tstr.to_string()),
+                            None => None,
+                        },
+                        in_columns: match tbn["in-columns"].as_str() {
+                            Some(tstr) => Some(tstr.to_string()),
+                            None => None,
+                        },
+                        in_spliter: match tbn["in-spliter"].as_str() {
+                            Some(tstr) => Some(tstr.to_string()),
+                            None => Some(",".to_string()),
                         },
                         update_seletive: tbn["update-seletive"].as_bool().unwrap_or_default(),
                         page_query: tbn["page-query"].as_bool().unwrap_or_default(),
+                        with_attachment: tbn["with-attachment"].as_bool().unwrap_or_default(),
                         logic_deletion: tbn["logic-deletion"].as_bool().unwrap_or_default(),
+                        using_common_search: tbn["common-search"].as_bool().unwrap_or_default(),
                         generate_handler: match tbn["generate-handler"].as_bool() {
-                            Some(ff) => {
-                                ff
-                            }
-                            None => {
-                                gh
-                            }
+                            Some(ff) => ff,
+                            None => gh,
                         },
                         simple_funclist: match tbn["simple-funclist"].as_vec() {
                             Some(listnode) => {
                                 let mut funclist = vec![];
                                 for mt in listnode {
                                     let funcname = match mt["func-name"].as_str() {
-                                        Some(fcn) => {
-                                            Some(fcn.to_string())
-                                        }
-                                        None => None
+                                        Some(fcn) => Some(fcn.to_string()),
+                                        None => None,
                                     };
                                     let condition = match mt["condition"].as_str() {
-                                        Some(fcn) => {
-                                            Some(fcn.to_string())
-                                        }
-                                        None => None
+                                        Some(fcn) => Some(fcn.to_string()),
+                                        None => None,
                                     };
                                     if funcname.is_some() && condition.is_some() {
                                         let func = SimpleFuncation {
                                             fun_name: funcname.unwrap_or_default(),
                                             condition: condition.unwrap_or_default(),
+                                            param_optional: mt["param_optional"]
+                                                .as_bool()
+                                                .unwrap_or_default(),
                                             is_list: mt["list"].as_bool().unwrap_or_default(),
                                             is_paged: mt["paged"].as_bool().unwrap_or_default(),
                                             is_self: mt["self-func"].as_bool().unwrap_or_default(),
@@ -815,13 +793,11 @@ impl CodeGenConfig {
                             None => {
                                 vec![]
                             }
-                        }
+                        },
                     });
                 }
             }
-            None => {
-
-            }
+            None => {}
         };
 
         let relations = RelationConfig::load_from_yaml_node(&node["relations"]);
@@ -901,15 +877,20 @@ impl CodeGenConfig {
                 false
             },
             always_generate_handler: gh,
-            always_generate_entity:  if let Some(s) = node["always-generate-entity"].as_bool() {
+            always_generate_entity: if let Some(s) = node["always-generate-entity"].as_bool() {
                 s.to_owned()
             } else {
                 true
             },
-            always_override:  if let Some(s) = node["always-override"].as_bool() {
+            always_override: if let Some(s) = node["always-override"].as_bool() {
                 s.to_owned()
             } else {
                 true
+            },
+            multi_tenancy: if let Some(s) = node["multi-tenancy"].as_bool() {
+                s.to_owned()
+            } else {
+                false
             },
             tables: tables,
             queries: queries,

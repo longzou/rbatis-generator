@@ -1,16 +1,15 @@
-/**
- * Generate the file for chimes_permission_info.rs, 
- */
-
-use std::fmt::{Debug};
-use serde_derive::{Deserialize, Serialize};
+use rbatis::crud::{Skip, CRUD};
 use rbatis::crud_table;
-use rbatis::rbatis::{Rbatis};
 use rbatis::error::Error;
+use rbatis::rbatis::Rbatis;
 use rbatis::Page;
 use rbatis::PageRequest;
 use rbson::Bson;
-use rbatis::crud::{CRUD, Skip};
+use serde_derive::{Deserialize, Serialize};
+/**
+ * Generate the file for chimes_permission_info.rs,
+ */
+use std::fmt::Debug;
 
 #[crud_table(table_name:"chimes_permission"|table_columns:"id,alias,create_time,name,pid,api_pattern,service_id,api_method,api_bypass")]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -26,110 +25,171 @@ pub struct ChimesPermissionInfo {
     pub api_bypass: Option<String>,
 }
 
-
 impl ChimesPermissionInfo {
     #[allow(dead_code)]
-    pub async fn from_id(rb: &Rbatis,id: &i64) -> Result<Option<Self>, Error> {
-        let wp = rb.new_wrapper()
-            .eq("id", id);
+    pub async fn from_id(rb: &Rbatis, id: &i64) -> Result<Option<Self>, Error> {
+        let wp = rb.new_wrapper().eq("id", id);
         rb.fetch_by_wrapper::<Option<Self>>(wp).await
     }
 
-
     #[allow(dead_code)]
-    pub async fn save(&mut self,rb: &Rbatis) -> Result<u64, Error> {
-        match rb.save(self, &[Skip::Column("id"),Skip::Column("create_time"),Skip::Column("id")]).await {
+    pub async fn save(&mut self, rb: &Rbatis) -> Result<u64, Error> {
+        match rb
+            .save(
+                self,
+                &[
+                    Skip::Column("id"),
+                    Skip::Column("create_time"),
+                    Skip::Column("id"),
+                ],
+            )
+            .await
+        {
             Ok(ds) => {
                 self.id = ds.last_insert_id;
                 Ok(ds.rows_affected)
             }
-            Err(err) => {
-                Err(err)
-            }
+            Err(err) => Err(err),
         }
     }
 
-
     #[allow(dead_code)]
-    pub async fn update(&self,rb: &Rbatis) -> Result<u64, Error> {
-        let wp = rb.new_wrapper()
-            .eq("id", self.id);
-        rb.update_by_wrapper(self, wp, &[Skip::Column("id"),Skip::Column("create_time"),Skip::Column("id")]).await
+    pub async fn update(&self, rb: &Rbatis) -> Result<u64, Error> {
+        let wp = rb.new_wrapper().eq("id", self.id);
+        rb.update_by_wrapper(
+            self,
+            wp,
+            &[
+                Skip::Column("id"),
+                Skip::Column("create_time"),
+                Skip::Column("id"),
+            ],
+        )
+        .await
     }
 
-
     #[allow(dead_code)]
-    pub async fn update_selective(&self,rb: &Rbatis) -> Result<u64, Error> {
-        let wp = rb.new_wrapper()
-            .eq("id", self.id);
-        rb.update_by_wrapper(self, wp, &[Skip::Value(Bson::Null)]).await
+    pub async fn update_selective(&self, rb: &Rbatis) -> Result<u64, Error> {
+        let wp = rb.new_wrapper().eq("id", self.id);
+        rb.update_by_wrapper(self, wp, &[Skip::Value(Bson::Null)])
+            .await
     }
 
-
     #[allow(dead_code)]
-    pub async fn remove_batch(&self,rb: &Rbatis) -> Result<u64, Error> {
-        let wp = rb.new_wrapper()
-                 .r#if(self.id.clone().is_some(), |w| w.and().eq("id", self.id.clone().unwrap()))
-                 .r#if(self.alias.clone().is_some(), |w| w.and().eq("alias", self.alias.clone().unwrap()))
-                 .r#if(self.create_time.clone().is_some(), |w| w.and().eq("create_time", self.create_time.clone().unwrap()))
-                 .r#if(self.name.clone().is_some(), |w| w.and().eq("name", self.name.clone().unwrap()))
-                 .r#if(self.pid.clone().is_some(), |w| w.and().eq("pid", self.pid.clone().unwrap()))
-                 .r#if(self.api_pattern.clone().is_some(), |w| w.and().eq("api_pattern", self.api_pattern.clone().unwrap()))
-                 .r#if(self.service_id.clone().is_some(), |w| w.and().eq("service_id", self.service_id.clone().unwrap()))
-                 .r#if(self.api_method.clone().is_some(), |w| w.and().eq("api_method", self.api_method.clone().unwrap()))
-                 .r#if(self.api_bypass.clone().is_some(), |w| w.and().eq("api_bypass", self.api_bypass.clone().unwrap()));
+    pub async fn remove_batch(&self, rb: &Rbatis) -> Result<u64, Error> {
+        let wp = rb
+            .new_wrapper()
+            .r#if(self.id.clone().is_some(), |w| {
+                w.and().eq("id", self.id.clone().unwrap())
+            })
+            .r#if(self.alias.clone().is_some(), |w| {
+                w.and().eq("alias", self.alias.clone().unwrap())
+            })
+            .r#if(self.create_time.clone().is_some(), |w| {
+                w.and().eq("create_time", self.create_time.clone().unwrap())
+            })
+            .r#if(self.name.clone().is_some(), |w| {
+                w.and().eq("name", self.name.clone().unwrap())
+            })
+            .r#if(self.pid.clone().is_some(), |w| {
+                w.and().eq("pid", self.pid.clone().unwrap())
+            })
+            .r#if(self.api_pattern.clone().is_some(), |w| {
+                w.and().eq("api_pattern", self.api_pattern.clone().unwrap())
+            })
+            .r#if(self.service_id.clone().is_some(), |w| {
+                w.and().eq("service_id", self.service_id.clone().unwrap())
+            })
+            .r#if(self.api_method.clone().is_some(), |w| {
+                w.and().eq("api_method", self.api_method.clone().unwrap())
+            })
+            .r#if(self.api_bypass.clone().is_some(), |w| {
+                w.and().eq("api_bypass", self.api_bypass.clone().unwrap())
+            });
         rb.remove_by_wrapper::<Self>(wp).await
     }
 
-
     #[allow(dead_code)]
-    pub async fn remove(&mut self,rb: &Rbatis) -> Result<u64, Error> {
-        let wp = rb.new_wrapper()
-            .eq("id", self.id);
+    pub async fn remove(&mut self, rb: &Rbatis) -> Result<u64, Error> {
+        let wp = rb.new_wrapper().eq("id", self.id);
         rb.remove_by_wrapper::<Self>(wp).await
     }
 
-
     #[allow(dead_code)]
-    pub async fn remove_ids(rb: &Rbatis,ids: &[i64]) -> Result<u64, Error> {
-        let wp = rb.new_wrapper()
-            .r#in("id", ids);
+    pub async fn remove_ids(rb: &Rbatis, ids: &[i64]) -> Result<u64, Error> {
+        let wp = rb.new_wrapper().r#in("id", ids);
         rb.remove_by_wrapper::<Self>(wp).await
     }
 
-
     #[allow(dead_code)]
-    pub async fn query_paged(&self,rb: &Rbatis,curr: u64,ps: u64) -> Result<Page<Self>, Error> {
-        let wp = rb.new_wrapper()
-                 .r#if(self.id.clone().is_some(), |w| w.and().eq("id", self.id.clone().unwrap()))
-                 .r#if(self.alias.clone().is_some(), |w| w.and().eq("alias", self.alias.clone().unwrap()))
-                 .r#if(self.create_time.clone().is_some(), |w| w.and().eq("create_time", self.create_time.clone().unwrap()))
-                 .r#if(self.name.clone().is_some(), |w| w.and().eq("name", self.name.clone().unwrap()))
-                 .r#if(self.pid.clone().is_some(), |w| w.and().eq("pid", self.pid.clone().unwrap()))
-                 .r#if(self.pid.clone().is_none(), |w| w.and().eq("pid", Some(0)))
-                 .r#if(self.api_pattern.clone().is_some(), |w| w.and().eq("api_pattern", self.api_pattern.clone().unwrap()))
-                 .r#if(self.service_id.clone().is_some(), |w| w.and().eq("service_id", self.service_id.clone().unwrap()))
-                 .r#if(self.api_method.clone().is_some(), |w| w.and().eq("api_method", self.api_method.clone().unwrap()))
-                 .r#if(self.api_bypass.clone().is_some(), |w| w.and().eq("api_bypass", self.api_bypass.clone().unwrap()));
-        rb.fetch_page_by_wrapper::<Self>(wp, &PageRequest::new(curr, ps)).await
+    pub async fn query_paged(&self, rb: &Rbatis, curr: u64, ps: u64) -> Result<Page<Self>, Error> {
+        let wp = rb
+            .new_wrapper()
+            .r#if(self.id.clone().is_some(), |w| {
+                w.and().eq("id", self.id.clone().unwrap())
+            })
+            .r#if(self.alias.clone().is_some(), |w| {
+                w.and().eq("alias", self.alias.clone().unwrap())
+            })
+            .r#if(self.create_time.clone().is_some(), |w| {
+                w.and().eq("create_time", self.create_time.clone().unwrap())
+            })
+            .r#if(self.name.clone().is_some(), |w| {
+                w.and().eq("name", self.name.clone().unwrap())
+            })
+            .r#if(self.pid.clone().is_some(), |w| {
+                w.and().eq("pid", self.pid.clone().unwrap())
+            })
+            .r#if(self.pid.clone().is_none(), |w| w.and().eq("pid", Some(0)))
+            .r#if(self.api_pattern.clone().is_some(), |w| {
+                w.and().eq("api_pattern", self.api_pattern.clone().unwrap())
+            })
+            .r#if(self.service_id.clone().is_some(), |w| {
+                w.and().eq("service_id", self.service_id.clone().unwrap())
+            })
+            .r#if(self.api_method.clone().is_some(), |w| {
+                w.and().eq("api_method", self.api_method.clone().unwrap())
+            })
+            .r#if(self.api_bypass.clone().is_some(), |w| {
+                w.and().eq("api_bypass", self.api_bypass.clone().unwrap())
+            });
+        rb.fetch_page_by_wrapper::<Self>(wp, &PageRequest::new(curr, ps))
+            .await
     }
 
-
     #[allow(dead_code)]
-    pub async fn query_list(&self,rb: &Rbatis) -> Result<Vec<Self>, Error> {
-        let wp = rb.new_wrapper()
-                 .r#if(self.id.clone().is_some(), |w| w.and().eq("id", self.id.clone().unwrap()))
-                 .r#if(self.alias.clone().is_some(), |w| w.and().eq("alias", self.alias.clone().unwrap()))
-                 .r#if(self.create_time.clone().is_some(), |w| w.and().eq("create_time", self.create_time.clone().unwrap()))
-                 .r#if(self.name.clone().is_some(), |w| w.and().eq("name", self.name.clone().unwrap()))
-                 .r#if(self.pid.clone().is_some(), |w| w.and().eq("pid", self.pid.clone().unwrap()))
-                 .r#if(self.api_pattern.clone().is_some(), |w| w.and().eq("api_pattern", self.api_pattern.clone().unwrap()))
-                 .r#if(self.service_id.clone().is_some(), |w| w.and().eq("service_id", self.service_id.clone().unwrap()))
-                 .r#if(self.api_method.clone().is_some(), |w| w.and().eq("api_method", self.api_method.clone().unwrap()))
-                 .r#if(self.api_bypass.clone().is_some(), |w| w.and().eq("api_bypass", self.api_bypass.clone().unwrap()));
+    pub async fn query_list(&self, rb: &Rbatis) -> Result<Vec<Self>, Error> {
+        let wp = rb
+            .new_wrapper()
+            .r#if(self.id.clone().is_some(), |w| {
+                w.and().eq("id", self.id.clone().unwrap())
+            })
+            .r#if(self.alias.clone().is_some(), |w| {
+                w.and().eq("alias", self.alias.clone().unwrap())
+            })
+            .r#if(self.create_time.clone().is_some(), |w| {
+                w.and().eq("create_time", self.create_time.clone().unwrap())
+            })
+            .r#if(self.name.clone().is_some(), |w| {
+                w.and().eq("name", self.name.clone().unwrap())
+            })
+            .r#if(self.pid.clone().is_some(), |w| {
+                w.and().eq("pid", self.pid.clone().unwrap())
+            })
+            .r#if(self.api_pattern.clone().is_some(), |w| {
+                w.and().eq("api_pattern", self.api_pattern.clone().unwrap())
+            })
+            .r#if(self.service_id.clone().is_some(), |w| {
+                w.and().eq("service_id", self.service_id.clone().unwrap())
+            })
+            .r#if(self.api_method.clone().is_some(), |w| {
+                w.and().eq("api_method", self.api_method.clone().unwrap())
+            })
+            .r#if(self.api_bypass.clone().is_some(), |w| {
+                w.and().eq("api_bypass", self.api_bypass.clone().unwrap())
+            });
         rb.fetch_list_by_wrapper::<Self>(wp).await
     }
-
 
     #[allow(dead_code)]
     pub async fn query_all(rb: &Rbatis) -> Result<Vec<Self>, Error> {
@@ -137,12 +197,12 @@ impl ChimesPermissionInfo {
         rb.fetch_list_by_wrapper::<Self>(wp).await
     }
 
-
     #[allow(dead_code)]
-    pub async fn query_tree(rb: &Rbatis,pid: &Option<i64>) -> Result<Vec<Self>, Error> {
-        let wp = rb.new_wrapper()
-                 .r#if(pid.clone().is_some(), |w| w.and().eq("pid", pid.unwrap()))
-                 .r#if(pid.clone().is_none(), |w| w.and().eq("pid", 0));
+    pub async fn query_tree(rb: &Rbatis, pid: &Option<i64>) -> Result<Vec<Self>, Error> {
+        let wp = rb
+            .new_wrapper()
+            .r#if(pid.clone().is_some(), |w| w.and().eq("pid", pid.unwrap()))
+            .r#if(pid.clone().is_none(), |w| w.and().eq("pid", 0));
         rb.fetch_list_by_wrapper::<Self>(wp).await
     }
 
@@ -158,21 +218,13 @@ impl ChimesPermissionInfo {
                     perm.api_method = self.api_method.clone();
                     perm.api_pattern = self.api_pattern.clone();
                     match perm.update(rb).await {
-                        Ok(r) => {
-                            Ok(r)
-                        }
-                        Err(err) => {
-                            Err(err)
-                        }
+                        Ok(r) => Ok(r),
+                        Err(err) => Err(err),
                     }
                 } else {
                     match self.save(rb).await {
-                        Ok(r) => {
-                            Ok(r)
-                        }
-                        Err(err) => {
-                            Err(err)
-                        }
+                        Ok(r) => Ok(r),
+                        Err(err) => Err(err),
                     }
                 }
             }
@@ -182,9 +234,6 @@ impl ChimesPermissionInfo {
             }
         }
     }
-
-
-
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -204,7 +253,6 @@ pub struct ChimesPermissionInfoValue {
     #[serde(default)]
     pub children: Vec<ChimesPermissionInfoValue>,
 }
-
 
 impl ChimesPermissionInfoValue {
     #[allow(dead_code)]
@@ -226,9 +274,12 @@ impl ChimesPermissionInfoValue {
         }
     }
 
-
     #[allow(dead_code)]
-    pub fn from_entity_with(param: &ChimesPermissionInfo,haschild: bool,children: &Vec<Self>) -> Self {
+    pub fn from_entity_with(
+        param: &ChimesPermissionInfo,
+        haschild: bool,
+        children: &Vec<Self>,
+    ) -> Self {
         Self {
             id: param.id.clone(),
             alias: param.alias.clone(),
@@ -246,7 +297,6 @@ impl ChimesPermissionInfoValue {
         }
     }
 
-
     #[allow(dead_code)]
     pub fn to_entity(&self) -> ChimesPermissionInfo {
         ChimesPermissionInfo {
@@ -262,8 +312,7 @@ impl ChimesPermissionInfoValue {
         }
     }
 
-
-    fn recurse_build_tree(items: &Vec<Self>,parent_item: &mut Self) {
+    fn recurse_build_tree(items: &Vec<Self>, parent_item: &mut Self) {
         for xip in items.clone() {
             if xip.pid == parent_item.id {
                 let mut mip = xip;
@@ -276,7 +325,6 @@ impl ChimesPermissionInfoValue {
             }
         }
     }
-
 
     #[allow(dead_code)]
     pub fn build_tree(items: &Vec<Self>) -> Vec<Self> {
@@ -293,9 +341,4 @@ impl ChimesPermissionInfoValue {
         }
         tree
     }
-
-
-    
-
 }
-
